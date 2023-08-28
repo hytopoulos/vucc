@@ -3,3 +3,4 @@
 *.idb
 *.nam
 *.til
+out/
