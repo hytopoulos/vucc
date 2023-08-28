@@ -1,152 +1,25 @@
 (setq *md-name* "md-v810")(setq *md-version* "0.1")
-
 (defun Nall nil (setq *optimize* '(auto-reg stupid-auto-reg v810-peephole)))
-
-(defun Oall nil (setq *optimize* '(auto-reg jump cse loop delete-zombi v810-peephole)))(setq *md-convit-optimize* nil)(setq *md-stack-align* 4)(setq *md-no-push-pop* t)(setq *md-expand-after-tiling* t)(defvar *mdl-Ncse-const* nil)(defvar *mdl-Ncse-global* nil)
-
+(defun Oall nil (setq *optimize* '(auto-reg jump cse loop delete-zombi v810-peephole)))(setq *md-convit-optimize* nil)(setq *md-stack-align* 4)(setq *md-no-push-pop* t)(setq *md-expand-after-tiling* t)
+(defvar *mdl-Ncse-const* nil)
+(defvar *mdl-Ncse-global* nil)
 (defun Ncse-const nil (setq *mdl-Ncse-const* t))
-
 (defun Ncse-global nil (setq *mdl-Ncse-global* t))
-
-(defun md-cse-const-p (expr &optional nrecomp)
-  (cond
-    (*mdl-Ncse-const* 'ignore)
-    ((<= nrecomp 3) 'ignore)
-    ((expr-zero-p expr) 'ignore)
-    ((let ((val (expr-value expr)))
-       (and (fixnum-p val) (<= -32768 val) (<= val 32767))) 'ignore)
-    ((and (sent-p (expr-value expr))
-          (eq 'function (car-safe (sent-htype (expr-value expr))))) 'ignore)
-    ((gpoffset-p (expr-value expr)) 'ignore)
-    (t 'copy-and-replace)))
-
-
-(defun md-cse-get-from-static-p (expr &optional nrecomp)
-  (cond
-    (*mdl-Ncse-global* 'ignore)
-    ((<= nrecomp 1) 'ignore)
-    (t 'copy-and-replace)))
-
-(defvar *use-move-bit-stirng-threshold* 20)
-
-(setq *use-move-bit-stirng-threshold* t)
-
-
-(defun md-expand-setn (to from nbyte)
-  (if (or (eq *use-move-bit-stirng-threshold* t) (< nbyte *use-move-bit-stirng-threshold*))
-      (let ((px (md-expand-setn-make-pointer (reduce-expr to)))
-            (py (md-expand-setn-make-pointer (reduce-expr from)))
-            htype offset delta)
-        (setq offset 0)
-        (while (< 0 nbyte)
-          (setq htype (cond ((<= 4 nbyte) 'i4)
-                            ((<= 2 nbyte) 'i2)
-                            (t 'i1))
-                delta (sizeof-htype htype))
-          (emit-ccode 'expr
-                      (make-expr 'set htype
-                                 (list (md-expand-setn-add-offset px offset)
-                                       (make-expr 'get htype
-                                                  (list (md-expand-setn-add-offset py offset))))))
-
-          (decf nbyte delta)
-          (incf offset delta))
-        t)
-      nil))
-
-(defun md-expand-setn-make-pointer (x)
-  (cond ((md-expand-setn-make-pointer-noreg-p x) x)
-        (t (let ((reg (genreg 'i4)))
-             (emit-ccode 'expr (make-expr-set-reg reg x))
-             reg))))
-
-(defun md-expand-setn-make-pointer-noreg-p (x)
-  (or (eq (expr-car x) 'const)
-      (and (memq (expr-car x) '(add sub))
-           (every 'md-expand-setn-make-pointer-noreg-p (expr-args x)))))
-
-(defun md-expand-setn-add-offset (x offset)
-  (cond ((sent-p x)
-         (make-expr 'add 'i4
-                    (list (make-expr-get-reg x)
-                          (make-expr 'const 'i4 offset))))
-        (t (make-expr 'add 'i4
-                      (list (copy-expr-all x)
-                            (make-expr 'const 'i4 offset))))))
-
-(defun md-expand-get-bitfield (expr tlabel flabel voidp)
-  (let* ((bit (car (expr-args expr)))
-         (signedp (eq (expr-car bit) 'bit))
-         (beg (expr-value (cadr (expr-args bit))))
-         (width (expr-value (caddr (expr-args bit)))))
-    (setq (car (expr-args expr)) (car (expr-args bit)))
-    (expand-expr-1
-     (cond ((and (zerop beg) (not signedp))
-            (make-expr 'band 'i4
-                       (list expr
-                             (make-expr-const 'i4 (unsigned-int -1 width)))))
-           (t (make-expr (if signedp 'rsh 'rshu) 'i4
-                         (list (make-expr 'lsh 'i4
-                                           (list expr
-                                                 (make-expr-const 'i4
-                                                                   (- 32 (+ beg width)))))
-
-                               (make-expr-const 'i4 (- 32 width)))))))
-    tlabel flabel voidp)))
-
-(defun md-expand-set-bitfield (expr tlabel flabel voidp)
-  (let* ((bit (car (expr-args expr)))
-         (y (cadr (expr-args expr)))
-         (p (car (expr-args bit)))
-         (beg (cadr (expr-args bit)))
-         (width (caddr (expr-args bit)))
-         (reg (genreg 'i4))
-         (mask1 (lsh (unsigned-int -1 (expr-value width)) (expr-value beg)))
-         p0)
-    (emit-ccode 'expr
-                (make-expr-set-reg reg
-                                   (make-expr 'band 'i4
-                                              (list (make-expr 'lsh 'i4
-                                                                (list y beg))
-                                                    (make-expr-const 'i4 mask1)))))
-    (setq p0 (expand-expr-1 p))
-    (emit-ccode 'expr
-                (make-expr 'set 'i4
-                           (list p0
-                                 (make-expr 'bor 'i4
-                                            (list (make-expr 'band 'i4
-                                                              (list (make-expr 'get 'i4
-                                                                                (list p0))
-                                                                    (make-expr-const 'i4
-                                                                                      (bnot mask1))))
-                                                  (make-expr-get-reg reg))))))
-
-    (make-expr-get-reg reg)))
-
+(defun md-cse-const-p (expr &optional nrecomp) (cond (*mdl-Ncse-const* 'ignore) ((<= nrecomp 3) 'ignore) ((expr-zero-p expr) 'ignore) ((let ((val (expr-value expr))) (and (fixnum-p val) (<= -32768 val) (<= val 32767))) 'ignore) ((and (sent-p (expr-value expr)) (eq 'function (car-safe (sent-htype (expr-value expr))))) 'ignore) ((gpoffset-p (expr-value expr)) 'ignore) (t 'copy-and-replace)))
+(defun md-cse-get-from-static-p (expr &optional nrecomp) (cond (*mdl-Ncse-global* 'ignore) ((<= nrecomp 1) 'ignore) (t 'copy-and-replace)))
+(defvar *use-move-bit-stirng-threshold* 20)(setq *use-move-bit-stirng-threshold* t)
+(defun md-expand-setn (to from nbyte) (if (or (eq *use-move-bit-stirng-threshold* t) (< nbyte *use-move-bit-stirng-threshold*)) (let ((px (md-expand-setn-make-pointer (reduce-expr to))) (py (md-expand-setn-make-pointer (reduce-expr from))) htype offset delta) (setq offset 0) (while (< 0 nbyte) (setq htype (cond ((<= 4 nbyte) 'i4) ((<= 2 nbyte) 'i2) (t 'i1)) delta (sizeof-htype htype)) (emit-ccode 'expr (make-expr 'set htype (list (md-expand-setn-add-offset px offset) (make-expr 'get htype (list (md-expand-setn-add-offset py offset)))))) (decf nbyte delta) (incf offset delta)) t) nil))
+(defun md-expand-setn-make-pointer (x) (cond ((md-expand-setn-make-pointer-noreg-p x) x) (t (let ((reg (genreg 'i4))) (emit-ccode 'expr (make-expr-set-reg reg x)) reg))))
+(defun md-expand-setn-make-pointer-noreg-p (x) (or (eq (expr-car x) 'const) (and (memq (expr-car x) '(add sub)) (every 'md-expand-setn-make-pointer-noreg-p (expr-args x)))))
+(defun md-expand-setn-add-offset (x offset) (cond ((sent-p x) (make-expr 'add 'i4 (list (make-expr-get-reg x) (make-expr 'const 'i4 offset)))) (t (make-expr 'add 'i4 (list (copy-expr-all x) (make-expr 'const 'i4 offset))))))
+(defun md-expand-get-bitfield (expr tlabel flabel voidp) (let* ((bit (car (expr-args expr))) (signedp (eq (expr-car bit) 'bit)) (beg (expr-value (cadr (expr-args bit)))) (width (expr-value (caddr (expr-args bit))))) (setq (car (expr-args expr)) (car (expr-args bit))) (expand-expr-1 (cond ((and (zerop beg) (not signedp)) (make-expr 'band 'i4 (list expr (make-expr-const 'i4 (unsigned-int -1 width))))) (t (make-expr (if signedp 'rsh 'rshu) 'i4 (list (make-expr 'lsh 'i4 (list expr (make-expr-const 'i4 (- 32 (+ beg width))))) (make-expr-const 'i4 (- 32 width)))))) tlabel flabel voidp)))
+(defun md-expand-set-bitfield (expr tlabel flabel voidp) (let* ((bit (car (expr-args expr))) (y (cadr (expr-args expr))) (p (car (expr-args bit))) (beg (cadr (expr-args bit))) (width (caddr (expr-args bit))) (reg (genreg 'i4)) (mask1 (lsh (unsigned-int -1 (expr-value width)) (expr-value beg))) p0) (emit-ccode 'expr (make-expr-set-reg reg (make-expr 'band 'i4 (list (make-expr 'lsh 'i4 (list y beg)) (make-expr-const 'i4 mask1))))) (setq p0 (expand-expr-1 p)) (emit-ccode 'expr (make-expr 'set 'i4 (list p0 (make-expr 'bor 'i4 (list (make-expr 'band 'i4 (list (make-expr 'get 'i4 (list p0)) (make-expr-const 'i4 (bnot mask1)))) (make-expr-get-reg reg)))))) (make-expr-get-reg reg)))
 (defvar *mdl-stack-arg-offset* 16)
-
-(defun md-expand-push-arg (arg argsp)
-  (let* ((htype (expr-htype arg))
-         (expr (make-expr 'set htype
-                           (list (make-expr 'auto 'i4
-                                             (+ argsp *mdl-stack-arg-offset*))
-                                 arg))))
-    (cond ((and (fixnum-p htype)
-                (md-expand-setn (car (expr-args expr))
-                                 (car (expr-args (cadr (expr-args expr))))
-                                 htype)))
-          (t (emit-ccode 'expr expr)))))
-
-
+(defun md-expand-push-arg (arg argsp) (let* ((htype (expr-htype arg)) (expr (make-expr 'set htype (list (make-expr 'auto 'i4 (+ argsp *mdl-stack-arg-offset*)) arg)))) (cond ((and (fixnum-p htype) (md-expand-setn (car (expr-args expr)) (car (expr-args (cadr (expr-args expr)))) htype))) (t (emit-ccode 'expr expr)))))
 (defun md-expand-pop-args (nbyte))
-
 (defun loadmsg (msg &rest args) (when *debug* (apply 'format t msg args)))
-
 (defun 2^n-p (n) (= (logcount n) 1))
-
-(defun log2 (n) (loglength (rshu n 1)))
-
-(loadmsg "0")
+(defun log2 (n) (loglength (rshu n 1)))(loadmsg "0")
 (defreg r10B i1 (conflict r10H r10W r10F))
 (defreg r11B i1 (conflict r11H r11W r11F))
 (defreg r12B i1 (conflict r12H r12W r12F))
@@ -227,8 +100,6 @@
 (defreg r23F f4 (conflict r23B r23H r23W))
 (defreg r24F f4 (conflict r24B r24H r24W))
 (defreg r25F f4 (conflict r25B r25H r25W))
-
-; "calling sequence protocol"
 (defcsp B-regs nil (r10B r11B r12B r13B r14B r15B r16B r17B r18B r19B r6B r7B r8B r9B r20B r21B r22B r23B r24B r25B))
 (defcsp H-regs nil (r10H r11H r12H r13H r14H r15H r16H r17H r18H r19H r6H r7H r8H r9H r20H r21H r22H r23H r24H r25H))
 (defcsp W-regs nil (r10W r11W r12W r13W r14W r15W r16W r17W r18W r19W r6W r7W r8W r9W r20W r21W r22W r23W r24W r25W))
@@ -238,29 +109,13 @@
 (defcsp am-sp (a) (auto i4 (= a)))
 (defcsp am-const (c) (const i4 (= c * not-gpoffset-p)))
 (defcsp am-gpoffset (g) (const i4 (= g * gpoffset-p)))
-
-(defun gpoffset-p (x)
-  (cond ((fixnum-p x)
-         (and *gp-offset*
-              (<= (- *gp-offset* 32767) x)
-              (<= x (+ *gp-offset* 32767))))
-        ((consp x)
-         (gpoffset-p (cadr x)))
-        ((sent-p x)
-         (if (eq (sent-scc x) 'extern)
-             nil
-             (memq (sent-segment x) '("bss"))))
-        (t nil)))
-
+(defun gpoffset-p (x) (cond ((fixnum-p x) (and *gp-offset* (<= (- *gp-offset* 32767) x) (<= x (+ *gp-offset* 32767)))) ((consp x) (gpoffset-p (cadr x))) ((sent-p x) (if (eq (sent-scc x) 'extern) nil (memq (sent-segment x) '("bss")))) (t nil)))
 (defun not-gpoffset-p (x) (not (gpoffset-p x)))
 (defcsp am-dx (d x) (add i4 (= x) (const i4 (= d))))
 (defcsp co-fixnum (n) (const * (= n * fixnum-p)))
 (defcsp co-fixnum-2^n-p (n) (const * (= n * 2^n-p)))
 (defcsp co-zero (htype) (const htype (= z * zerop)))
-
-(defun expr-not-reg-p (expr) (not (eq (expr-car expr) 'reg)))
-
-(loadmsg "2")
+(defun expr-not-reg-p (expr) (not (eq (expr-car expr) 'reg)))(loadmsg "2")
 (defcode getreg (get i1 (= x (reg))) (reg r))
 (defcode getreg (get i2 (= x (reg))) (reg r))
 (defcode getreg (get i4 (= x (reg))) (reg r))
@@ -424,102 +279,23 @@
 (defcode jump2f4-general (jump2 ((jcode jmc) * (= r (* f4)) (= p (* f4))) la) (reg nil r p) (gen ((r . F-regs) (p . F-regs)) (cmpf.s 'p 'r) ('jmc 'la)))
 (defcode jump2i4-const (jump2 ((jcode jmc) * (= r (* i4)) (co-fixnum c)) la) (reg nil r) (gen ((r . W-regs)) (cmp (i4 'c) 'r) ('jmc 'la)))
 (defcode jumpn (jumpn (= r) calist) (reg nil r) (gen ((r . W-regs)) (progn (emit-jumpn r calist))))
-
-(defun emit-jumpn (reg calist)
-  (dolist (c calist)
-    (setq (sent-scc (cadr c)) 'caselabel))
-  (let ((dlabel (genlabel)))
-    (setq (sent-scc dlabel) 'caselabel)
-    (emit-jumpn-rec reg calist dlabel)
-    (emit-mcode (list 'def dlabel))))
-
-(defun emit-jumpn-rec (reg calist dlabel)
-  (cond ((emit-jumpn-by-table-p calist)
-         (emit-jumpn-by-table reg calist dlabel))
-        ((emit-jumpn-by-liner-p calist)
-         (emit-jumpn-by-liner reg calist dlabel))
-        (t (let ((tmpl (genlabel)))
-             (letl (calist1 center calist2)
-               (emit-jumpn-split-calist calist)
-               (emit-mcode (list 'cmp (list 'i4 (car center)) reg))
-               (emit-mcode (list 'jmp-eq (cadr center)))
-               (emit-mcode (list 'jmp-gt tmpl))
-               (emit-jumpn-rec reg calist1 dlabel)
-               (emit-mcode (list 'def tmpl))
-               (emit-jumpn-rec reg calist2 dlabel))))))
-
-(defun emit-jumpn-by-table-p (calist)
-  (let ((min (caar calist))
-        (max (caar (last calist)))
-        (len (length calist)))
-    (and (<= 5 len)
-         (<= (- max min) (* 3 len)))))
-
-(defun emit-jumpn-by-liner-p (calist)
-  (<= (length calist) 2))
-
-(defun emit-jumpn-by-liner (reg calist dlabel)
-  (dolist (c calist)
-    (emit-mcode (list 'cmp (list 'i4 (car c)) reg))
-    (emit-mcode (list 'jmp-eq (cadr c))))
-  (when dlabel
-    (emit-mcode (list 'jmp-1 dlabel))))
-
-(defun emit-jumpn-split-calist (calist)
-  (let ((len (length calist))
-        x y)
-    (unless (<= 3 len)
-      (clerror "emit-jumpn-split-calist: unexpedted list length"))
-    (setq y (nthcdr (/ len 2) calist)
-          x (ldiff calist y))
-    (list x (car y) (cdr y))))
-
+(defun emit-jumpn (reg calist) (dolist (c calist) (setq (sent-scc (cadr c)) 'caselabel)) (let ((dlabel (genlabel))) (setq (sent-scc dlabel) 'caselabel) (emit-jumpn-rec reg calist dlabel) (emit-mcode (list 'def dlabel))))
+(defun emit-jumpn-rec (reg calist dlabel) (cond ((emit-jumpn-by-table-p calist) (emit-jumpn-by-table reg calist dlabel)) ((emit-jumpn-by-liner-p calist) (emit-jumpn-by-liner reg calist dlabel)) (t (let ((tmpl (genlabel))) (letl (calist1 center calist2) (emit-jumpn-split-calist calist) (emit-mcode (list 'cmp (list 'i4 (car center)) reg)) (emit-mcode (list 'jmp-eq (cadr center))) (emit-mcode (list 'jmp-gt tmpl)) (emit-jumpn-rec reg calist1 dlabel) (emit-mcode (list 'def tmpl)) (emit-jumpn-rec reg calist2 dlabel))))))
+(defun emit-jumpn-by-table-p (calist) (let ((min (caar calist)) (max (caar (last calist))) (len (length calist))) (and (<= 5 len) (<= (- max min) (* 3 len)))))
+(defun emit-jumpn-by-liner-p (calist) (<= (length calist) 2))
+(defun emit-jumpn-by-liner (reg calist dlabel) (dolist (c calist) (emit-mcode (list 'cmp (list 'i4 (car c)) reg)) (emit-mcode (list 'jmp-eq (cadr c)))) (when dlabel (emit-mcode (list 'jmp-1 dlabel))))
+(defun emit-jumpn-split-calist (calist) (let ((len (length calist)) x y) (unless (<= 3 len) (clerror "emit-jumpn-split-calist: unexpedted list length")) (setq y (nthcdr (/ len 2) calist) x (ldiff calist y)) (list x (car y) (cdr y))))
 (defvar *mdl-jumpn-table-id* 0)
 (defvar *mdl-jumpn-table-list* nil)
-
-(defun emit-jumpn-by-table (reg calist dlabel)
-  (let ((min (caar calist))
-        (max (caar (last calist)))
-        table)
-    (cond ((zerop min)
-           (emit-mcode (list 'mov reg 'r30W)))
-          (t
-           (decf max min)
-           (emit-mcode (list 'addi (list 'i4 (- min)) reg 'r30W))
-           (dolist (c calist)
-             (decf (car c) min))))
-    (setq table (make-jumpn-table calist dlabel))
-    (emit-mcode (list 'cmp (list 'i4 max) 'r30W))
-    (emit-mcode (list 'jmp-gtu dlabel))
-    (emit-mcode '(shl (i4 2) r30W))
-    (emit-mcode (list 'ld.w (list 'dx table 'r30W) 'r30W))
-    (emit-mcode '(jmp (dx 0 r30W)))))
-
-(defun make-jumpn-table (calist dlabel)
-  (let ((tlabel (genlabel))
-        (table (make-tconc))
-        (n 0))
-    (setq (sent-asmname tlabel)
-          (format nil "LS%d" (incf *mdl-jumpn-table-id*)))
-    (dolist (c calist)
-      (while (< n (car c))
-        (tconc table dlabel)
-        (incf n))
-      (tconc table (cadr c))
-      (incf n))
-    (push (cons tlabel (tconc-list table)) *mdl-jumpn-table-list*)
-    tlabel))
-
-(defun emit-jumpn-tables nil
-  (dolist (table *mdl-jumpn-table-list*)
-    (emit-acode-changeseg "const")
-    (emit-acode-align 4)
-    (emit-acode-def (sent-asmname (car table)))
-    (dolist (e (cdr table))
-      (emit-acode-data 'i4 e)))
-  (setq *mdl-jumpn-table-list* nil))
-  
-(defcode label (label la) (gen nil (def 'la)))(loadmsg "a")(extern *cfun-name* *cfun-args-htype* *cfun-return-htype* *cfun-ahtype* *cfun-param-list* *cfun-local-list* *cfun-local-size* *cfun-tmp-list* *cfun-tmp-size* *cfun-args-size* *cfun-is-leaf-p*)(defvar *mdl-frame-size* 0)(defvar *mdl-arg* 0)(defvar *mdl-hreg-save-area* 0)(defvar *mdl-hreg-save-area-size* 0)
+(defun emit-jumpn-by-table (reg calist dlabel) (let ((min (caar calist)) (max (caar (last calist))) table) (cond ((zerop min) (emit-mcode (list 'mov reg 'r30W))) (t (decf max min) (emit-mcode (list 'addi (list 'i4 (- min)) reg 'r30W)) (dolist (c calist) (decf (car c) min)))) (setq table (make-jumpn-table calist dlabel)) (emit-mcode (list 'cmp (list 'i4 max) 'r30W)) (emit-mcode (list 'jmp-gtu dlabel)) (emit-mcode '(shl (i4 2) r30W)) (emit-mcode (list 'ld.w (list 'dx table 'r30W) 'r30W)) (emit-mcode '(jmp (dx 0 r30W)))))
+(defun make-jumpn-table (calist dlabel) (let ((tlabel (genlabel)) (table (make-tconc)) (n 0)) (setq (sent-asmname tlabel) (format nil "LS%d" (incf *mdl-jumpn-table-id*))) (dolist (c calist) (while (< n (car c)) (tconc table dlabel) (incf n)) (tconc table (cadr c)) (incf n)) (push (cons tlabel (tconc-list table)) *mdl-jumpn-table-list*) tlabel))
+(defun emit-jumpn-tables nil (dolist (table *mdl-jumpn-table-list*) (emit-acode-changeseg "const") (emit-acode-align 4) (emit-acode-def (sent-asmname (car table))) (dolist (e (cdr table)) (emit-acode-data 'i4 e))) (setq *mdl-jumpn-table-list* nil))
+(defcode label (label la) (gen nil 
+(def 'la)))(loadmsg "a")(extern *cfun-name* *cfun-args-htype* *cfun-return-htype* *cfun-ahtype* *cfun-param-list* *cfun-local-list* *cfun-local-size* *cfun-tmp-list* *cfun-tmp-size* *cfun-args-size* *cfun-is-leaf-p*)
+(defvar *mdl-frame-size* 0)
+(defvar *mdl-arg* 0)
+(defvar *mdl-hreg-save-area* 0)
+(defvar *mdl-hreg-save-area-size* 0)
 (defcode prologue (prologue) (gen nil (progn (let ((frame (if *cfun-is-leaf-p* 0 *mdl-stack-arg-offset*))) (setq *mdl-arg* frame) (incf frame *cfun-args-size*) (dolist (s *cfun-local-list*) (incf (sent-offset s) frame)) (incf frame *cfun-local-size*) (dolist (s *cfun-tmp-list*) (incf (sent-offset s) frame)) (incf frame *cfun-tmp-size*) (let (res) (dolist (r *cfun-hreg-list*) (setq r (get r 'W-reg)) (unless (memq r res) (push r res))) (setq *cfun-hreg-list* res)) (setq *cfun-hreg-list* (delq 'r10W *cfun-hreg-list*)) (dolist (reg *md-caller-save-regs*) (setq *cfun-hreg-list* (delq reg *cfun-hreg-list*))) (setq *mdl-hreg-save-area* frame *mdl-hreg-save-area-size* (* 4 (length *cfun-hreg-list*))) (incf frame *mdl-hreg-save-area-size*) (unless *cfun-is-leaf-p* (incf frame 4)) (setq *mdl-frame-size* frame) (dolist (s *cfun-param-list*) (incf (sent-offset s) (+ *mdl-frame-size* *mdl-stack-arg-offset*))))) (progn (emit-mcode 'comment (format nil "framesize %d = %d(args) + %d(local) + %d(tmp) + %d(saveregs) + %d(savelp)" *mdl-frame-size* *cfun-args-size* *cfun-local-size* *cfun-tmp-size* *mdl-hreg-save-area-size* (if *cfun-is-leaf-p* 0 4))) (emit-mcode 'comment (format nil "used callee save regs = %t" *cfun-hreg-list*)) (dolist (s *cfun-param-list*) (emit-mcode 'comment (format nil "param %T = (auto %d)" (sent-name s) (sent-offset s)))) (dolist (s *cfun-local-list*) (emit-mcode 'comment (format nil "local %T = (auto %d)" (sent-name s) (sent-offset s)))) (dolist (s *cfun-tmp-list*) (emit-mcode 'comment (format nil "tmp   %T = (auto %d)" (sent-name s) (sent-offset s))))) (progn (unless (zerop *mdl-frame-size*) (emit-mcode (list 'add (list 'i4 (- *mdl-frame-size*)) 'sp))) (unless *cfun-is-leaf-p* (emit-mcode (list 'st.w 'lp (list 'sp (list 'sub *mdl-frame-size* 4))))) (unless (zerop *mdl-hreg-save-area-size*) (let ((off *mdl-hreg-save-area*)) (dolist (reg *cfun-hreg-list*) (emit-mcode (list 'st.w reg (list 'sp (posincf off 4))))))))))
 (defcode epilogue (epilogue) (gen nil (progn (unless *cfun-is-leaf-p* (emit-mcode (list 'ld.w (list 'sp (list 'sub *mdl-frame-size* 4)) 'lp))) (unless (zerop *mdl-hreg-save-area-size*) (let ((off *mdl-hreg-save-area*)) (dolist (reg *cfun-hreg-list*) (emit-mcode (list 'ld.w (list 'sp (posincf off 4)) reg))))) (unless (zerop *mdl-frame-size*) (emit-mcode (list 'add (list 'i4 *mdl-frame-size*) 'sp)))) (jmp (dx 0 lp))))
 (defcode pusharg (set i1 (arg) (= x)) (reg nil x) (gen ((x . B-regs)) (progn (emit-mcode (list 'st.b x (list 'sp *mdl-arg*))) (setq *mdl-arg* (+ *mdl-arg* 4)))))
@@ -541,312 +317,32 @@
 (defcode ret-i2 (set i2 (ret) (= r)) (reg nil r) (gen ((r r10H))))
 (defcode ret-i4 (set i4 (ret) (= r)) (reg nil r) (gen ((r r10W))))
 (defcode ret-f4 (set f4 (ret) (= r)) (reg nil r) (gen ((r r10F))))(loadmsg "b")
-
-(defun peephole-optimize (bblockh))
-(load "md-v810p.cl")
-(setq *mcode-bra-offset* nil)
-(loadmsg "c")
-(setq *md-no-underscore* nil)
+(defun peephole-optimize (bblockh))(load "md-v810p.cl")(setq *mcode-bra-offset* nil)(loadmsg "c")(setq *md-no-underscore* nil)
 (defvar *mdl-lstatic/string-id* 0)
-
-(defun make-asm-name (name class)
-  (ecase class
-    ((extern global static)
-     (if *md-no-underscore*
-         name
-         (format nil "_%s" name)))
-    (lstatic
-     (format nil "%s@%d" name (incf *mdl-lstatic/string-id*)))
-    (string
-     (format nil "%s@%d" name (incf *mdl-lstatic/string-id*)))))
-
-(defun emit-acode-beginning-of-object nil
-  (setq *mdl-float-literal-alist* nil
-        *mdl-float-literal-id* 0)
-  (emit-acode ";;; source = %T\n"
-              (file-name-change-suffix (stream-name *objsm*) ".c"))
-  (emit-acode ";;; cparse = (%T %T %T)\n"
-              *cparse-version* *ld-name* *ld-version*)
-  (emit-acode ";;; cgrind = (%T %T %T)\n"
-              *cgrind-version* *md-name* *md-version*)
-  (dolist (sym '(*command-line-args* *optimize* *debug*))
-    (let ((vals (symbol-value sym)))
-      (when vals
-        (emit-acode ";;; %t = (" sym)
-        (dolist (a vals)
-          (emit-acode "\n;;;     %t" a))
-        (emit-acode ")\n"))))
-  (emit-acode "\n")
-  (emit-acode "	isv810\n")
-  (emit-acode "	rsvreg	1\n")
-  (emit-acode "	capsoff\n")
-  (emit-acode "align	def	even\n")
-  (emit-acode "	lprefix	' '\n")
-  (emit-acode "	decon   branch\n")
-  (emit-acode "	oncnum\n")
-  (if *gp-offset*
-      (emit-acode "	assume	gp,$%x\n" *gp-offset*)
-      (progn
-        (emit-acode "	extern	gp_offset\n")
-        (emit-acode "	assume	gp,gp_offset\n"))))
-        
-(defun emit-acode-debug-info-type nil
-  (emit-acode "\n;;; type define table\n")
-  (emit-acode "DB@T_COUNT		equ	0\n")
-  (emit-acode "DB@T_ATOM		equ	1\n")
-  (emit-acode "DB@T_PTR		equ	2\n")
-  (emit-acode "DB@T_VECT		equ	3\n")
-  (emit-acode "DB@T_STRUCT		equ	4\n")
-  (emit-acode "DB@T_UNION		equ	5\n")
-  (emit-acode "DB@T_ENUM		equ	6\n")
-  (emit-acode "DB@T_FUNC		equ	7\n")
-  (emit-acode "DB@T_TYPENAME		equ	8\n")
-  (emit-acode "DB@T_STRUCT_MEMBER	equ	0x10|DB@T_STRUCT\n")
-  (emit-acode "DB@T_UNION_MEMBER	equ	0x10|DB@T_UNION\n")
-  (emit-acode "DB@T_ENUM_MEMBER	equ	0x10|DB@T_ENUM\n")
-  (emit-acode "DB@T_FUNC_ARG		equ	0x10|DB@T_FUNC\n")
-  (emit-acode "\n;;; type table\n")
-  (emit-acode "	dbtype	DB@T_COUNT,%d ; Number of types.\n"
-              (length *typevector*))
-  (dotimes (i (length *typevector*))
-    (let ((type (vref *typevector* i)))
-      (if (< i 10)
-          (progn
-            (emit-acode "	dbtype	DB@T_ATOM,")
-            (emit-acode (ecase type
-                          (char "\"char\",1,1")
-                          (short "\"short\",1,2")
-                          (int "\"int\",1,4")
-                          (long "\"long\",1,4")
-                          (uchar "\"unsigned char\",0,1")
-                          (ushort "\"unsigned short\",0,2")
-                          (uint "\"unsigned int\",0,4")
-                          (ulong "\"unsigned long\",0,4")
-                          (float "\"float\",2,4")
-                          (void "\"void\",3,4")))
-            (emit-acode "%55i; #%d\n" i))
-          (progn
-            (ecase (car type)
-              (type
-               (emit-acode "	dbtype	DB@T_TYPENAME,%t,%d %55i; #%d\n"
-                           (cadr type) (caddr type) i))
-              (pointer
-               (emit-acode "	dbtype	DB@T_PTR,%d %55i; #%d\n"
-                           (cadr type) i))
-              (vector
-               (emit-acode "	dbtype	DB@T_VECT,%d,%d %55i; #%d\n"
-                           (caddr type) (or (cadr type) 0) i))
-              #'(let ((argtypes (delq '&rest (copy-list (cadr type)))))
-                  (emit-acode "	dbtype	DB@T_FUNC,%d,%d %55i; #%d\n"
-                              (caddr type) (length argtypes) i)
-                  (dolist (a argtypes)
-                    (emit-acode "	dbtype	DB@T_FUNC_ARG,%d\n" a)))
-              ((struct union)
-               (emit-acode "	dbtype	%t,%t,%d,%d %55i; #%d\n"
-                           (ecase (car type)
-                             (struct 'DB@T_STRUCT)
-                             (union 'DB@T_UNION))
-                           (or (cadr type) "")
-                           (length (cdddr type))
-                           (or (caddr type) 0)
-                           i)
-               (dolist (m (cdddr type))
-                 (ecase (car type)
-                   (struct
-                    (emit-acode "	dbtype	DB@T_STRUCT_MEMBER,%t,%d,%d,%d\n"
-                                (car m) (cadr m) (nth 2 m) (nth 3 m)))
-                   (union
-                    (emit-acode "	dbtype	DB@T_UNION_MEMBER,%t,%d\n"
-                                (car m) (cadr m)))))))
-              (enum
-               (emit-acode "	dbtype	DB@T_ENUM,%t,%d %55i; #%d\n"
-                           (or (cadr type) "")
-                           (length (cddr type))
-                           i)
-               (dolist (m (cddr type))
-                 (emit-acode "	dbtype	DB@T_ENUM_MEMBER,%t,%d\n"
-                             (car m) (cadr m))))))))))
-
+(defun make-asm-name (name class) (ecase class ((extern global static) (if *md-no-underscore* name (format nil "_%s" name))) (lstatic (format nil "%s@%d" name (incf *mdl-lstatic/string-id*))) (string (format nil "%s@%d" name (incf *mdl-lstatic/string-id*)))))
+(defun emit-acode-beginning-of-object nil (setq *mdl-float-literal-alist* nil *mdl-float-literal-id* 0) (emit-acode ";;; source = %T\n" (file-name-change-suffix (stream-name *objsm*) ".c")) (emit-acode ";;; cparse = (%T %T %T)\n" *cparse-version* *ld-name* *ld-version*) (emit-acode ";;; cgrind = (%T %T %T)\n" *cgrind-version* *md-name* *md-version*) (dolist (sym '(*command-line-args* *optimize* *debug*)) (let ((vals (symbol-value sym))) (when vals (emit-acode ";;; %t = (" sym) (dolist (a vals) (emit-acode "\n;;;     %t" a)) (emit-acode ")\n")))) (emit-acode "\n") (emit-acode "isv810\n") (emit-acode "rsvreg1\n") (emit-acode "capsoff\n") (emit-acode "aligndefeven\n") (emit-acode "lprefix' '\n") (emit-acode "decon   branch\n") (emit-acode "oncnum\n") (if *gp-offset* (emit-acode "assumegp,$%x\n" *gp-offset*) (progn (emit-acode "externgp_offset\n") (emit-acode "assumegp,gp_offset\n"))) (when *debugger* (emit-acode-debug-info-type)) (emit-acode "\n"))
+(defun emit-acode-debug-info-type nil (emit-acode "\n;;; type define table\n") (emit-acode "DB@T_COUNTequ0\n") (emit-acode "DB@T_ATOMequ1\n") (emit-acode "DB@T_PTRequ2\n") (emit-acode "DB@T_VECTequ3\n") (emit-acode "DB@T_STRUCTequ4\n") (emit-acode "DB@T_UNIONequ5\n") (emit-acode "DB@T_ENUMequ6\n") (emit-acode "DB@T_FUNCequ7\n") (emit-acode "DB@T_TYPENAMEequ8\n") (emit-acode "DB@T_STRUCT_MEMBERequ0x10|DB@T_STRUCT\n") (emit-acode "DB@T_UNION_MEMBERequ0x10|DB@T_UNION\n") (emit-acode "DB@T_ENUM_MEMBERequ0x10|DB@T_ENUM\n") (emit-acode "DB@T_FUNC_ARGequ0x10|DB@T_FUNC\n") (emit-acode "\n;;; type table\n") (emit-acode "dbtypeDB@T_COUNT,%d ; Number of types.\n" (length *typevector*)) (dotimes (i (length *typevector*)) (let ((type (vref *typevector* i))) (if (< i 10) (progn (emit-acode "dbtypeDB@T_ATOM,") (emit-acode (ecase type (char "\"char\",1,1") (short "\"short\",1,2") (int "\"int\",1,4") (long "\"long\",1,4") (uchar "\"unsigned char\",0,1") (ushort "\"unsigned short\",0,2") (uint "\"unsigned int\",0,4") (ulong "\"unsigned long\",0,4") (float "\"float\",2,4") (void "\"void\",3,4"))) (emit-acode "%55i; #%d\n" i)) (progn (ecase (car type) (type (emit-acode "dbtypeDB@T_TYPENAME,%t,%d %55i; #%d\n" (cadr type) (caddr type) i)) (pointer (emit-acode "dbtypeDB@T_PTR,%d %55i; #%d\n" (cadr type) i)) (vector (emit-acode "dbtypeDB@T_VECT,%d,%d %55i; #%d\n" (caddr type) (or (cadr type) 0) i)) #'(let ((argtypes (delq '&rest (copy-list (cadr type))))) (emit-acode "dbtypeDB@T_FUNC,%d,%d %55i; #%d\n" (caddr type) (length argtypes) i) (dolist (a argtypes) (emit-acode "dbtypeDB@T_FUNC_ARG,%d\n" a))) ((struct union) (emit-acode "dbtype%t,%t,%d,%d %55i; #%d\n" (ecase (car type) (struct 'DB@T_STRUCT) (union 'DB@T_UNION)) (or (cadr type) "") (length (cdddr type)) (or (caddr type) 0) i) (dolist (m (cdddr type)) (ecase (car type) (struct (emit-acode "dbtypeDB@T_STRUCT_MEMBER,%t,%d,%d,%d\n" (car m) (cadr m) (nth 2 m) (nth 3 m))) (union (emit-acode "dbtypeDB@T_UNION_MEMBER,%t,%d\n" (car m) (cadr m)))))) (enum (emit-acode "dbtypeDB@T_ENUM,%t,%d %55i; #%d\n" (or (cadr type) "") (length (cddr type)) i) (dolist (m (cddr type)) (emit-acode "dbtypeDB@T_ENUM_MEMBER,%t,%d\n" (car m) (cadr m))))))))))
 (defvar *md-notify-room* nil)
-
-(defun emit-acode-end-of-object nil
-  (emit-acode "\n	end\n")
-  (when *md-notify-room*
-    (room t)))
-
-(defun emit-acode-beginning-of-function (name)
-  (emit-acode "\n;;; FUNCTION %T\n" name))
-
-(defun emit-acode-end-of-function nil
-  (emit-jumpn-tables))
-
-(defun emit-acode-static-variable (sent value)
-  (if (eq (sent-segment sent) "bss")
-      (progn
-        (unless (eq *current-segment-name* "bss")
-          (emit-acode-changeseg "bss")
-          (setq *current-segment-name* "bss"))
-        (emit-acode "%s	%t	%d,%d\n"
-                    (sent-asmname sent)
-                    (if (eq (sent-scc sent) 'global) 'comm 'comm)
-                    (sizeof-htype (sent-htype sent))
-                    (sent-align sent))
-        t)
-      nil))
-
-(defun emit-acode-changeseg (segname)
-  (when (and segname (not (eq segname *current-segment-name*)))
-    (emit-acode "%T	group\n" segname)
-    (unless (memq segname *mdl-emitted-segment-name-list*)
-      (push segname *mdl-emitted-segment-name-list*)
-      (unless (memq segname '("text" "bss"))
-        (emit-acode-align 4)))
-    (setq *current-segment-name* segname)))
-
-(defun emit-acode-align (align)
-  (emit-acode "	align	%d\n" align))
-
-(defun emit-acode-def (name)
-  (when (sent-p name)
-    (setq name (sent-asmname name)))
-  (emit-acode "%T:\n" name))
-
-(defun emit-acode-xdef (name)
-  (emit-acode "	public	%T\n" name)
-  (emit-acode "%T:\n" name))
-
-(defun emit-acode-extern (name)
-  (emit-acode "	extern	%T\n" name))
-
-(defun emit-acode-space (nbyte)
-  (emit-acode "	ds	%d\n" nbyte))
-
-(defun emit-acode-zeros (nbyte)
-  (let ((n 0))
-    (dotimes (b nbyte)
-      (if (zerop (% n 15))
-          (emit-acode "%n	db	")
-          (emit-acode ","))
-      (emit-acode "0")
-      (incf n))
-    (emit-acode "\n")))
-
-(defun emit-acode-string (bytelist)
-  (let ((n 0))
-    (dolist (b bytelist)
-      (if (zerop (% n 15))
-          (emit-acode "%n	db	")
-          (emit-acode ","))
-      (emit-acode "%d" b)
-      (incf n))
-    (emit-acode "\n")))
-
-(defun emit-acode-data (htype data)
-  (unless (fixnum-p data)
-    (setq data (conv-asmconst-to-infix data)))
-  (ecase htype
-    (i1 (emit-acode "	db	%T\n" data))
-    (i2 (emit-acode "	dh	%T\n" data))
-    (i4 (emit-acode "	dw	%T\n" data))
-    (f4 (emit-acode "	dw	%T\n" data))))
-
-(defun emit-acode-jmp-bra (code label)
-  (if *debug*
-      (emit-acode "	%t	%T\n" code label)
-      (emit-acode
-       (ecase code
-         (jmp-1 "	jr	%T\n")
-         (jmp-eq "	be	%T\n")
-         (jmp-ne "	bne	%T\n")
-         (jmp-lt "	blt	%T\n")
-         (jmp-ltu "	bl	%T\n")
-         (jmp-le "	ble	%T\n")
-         (jmp-leu "	bnh	%T\n")
-         (jmp-gt "	bgt	%T\n")
-         (jmp-gtu "	bh	%T\n")
-         (jmp-ge "	bge	%T\n")
-         (jmp-geu "	bnl	%T\n"))
-       label)))
-
-(defun emit-acode-debug-info-code (info)
-  (ecase (car info)
-    (file (emit-acode "	dbsrc	%s\n" (cadr info)))
-    (line (emit-acode "	dbline	%d\n" (cadr info)))
-    (begin (emit-acode "B@%d:\n" (cadr info)))
-    (end (emit-acode "E@%d:\n" (cadr info)))))
-
-
-(defun emit-acode-debug-info-scope (sid)
-  (if (zerop sid)
-      (emit-acode "\n	dbscope	0,0\n")
-      (emit-acode "	dbscope	B@%d,E@%d\n" sid sid)))
-
-(defun emit-acode-debug-info-sent (name class typeid place)
-  (if (eq class 'type)
-      (let ((space (if (consp name) 9 8))
-            (name (if (consp name) (cadr name) name)))
-        (emit-acode "	dbivar	%t,%d,%t,0\n" name typeid space))
-      (progn
-        (emit-acode "	dbivar	%t,%d,%d," name typeid
-                    (ecase class
-                      (global 0)
-                      (static 1)
-                      (lstatic 4)
-                      (auto 5)
-                      (register 6)))
-        (ecase class
-          ((global static lstatic) (emit-acode "%s" place))
-          (auto (emit-acode "%d" place))
-          (register (emit-acode "%s" (substring (symbol-name place) 1 -1))))
-        (emit-acode "\n"))))
-
-(defun emit-acode-mcode (mcode)
-  (let ((code (mcode-code mcode))
-        (args (mcode-args mcode))
-        (first t))
-    (emit-acode "	%t" code)
-    (dolist (a args)
-      (emit-acode (if first "	" ","))
-      (setq first nil)
-      (cond ((symbol-p a) (emit-acode "%s" (emit-acode-mcode-regname a)))
-            ((fixnum-p a) (emit-acode "%d" a))
-            (t (ecase (car a)
-                 ((i1 i2 i4 f4) (emit-acode "%s" (conv-asmconst-to-infix (cadr a))))
-                 ((sp gp) (emit-acode "%s[%s]" (emit-acode-mcode-offset (cadr a)) (emit-acode-mcode-regname (car a))))
-                 (dx (emit-acode "%s[%s]" (emit-acode-mcode-offset (cadr a)) (emit-acode-mcode-regname (caddr a))))))))
-    (emit-acode "\n")))
-
-(defun emit-acode-mcode-offset (o)
-  (if (zerop o) "" (conv-asmconst-to-infix o)))
-
-(defun emit-acode-mcode-regname (regsym)
-  (let ((regname (symbol-name regsym)))
-    (when (and (not *debug*) (not (memq regsym '(sp gp lp tp))))
-      (setq regname (substring regname 0 -1)))
-    regname))
-
-(defun emit-acode-comment (msg)
-  (emit-acode ";; %T\n" msg))
-
-(defun conv-asmconst-to-infix (expr)
-  (cond ((sent-p expr)
-         (if (eq (sent-sc expr) 'static)
-             (sent-asmname expr)
-             (if *debug*
-                 (sent-name expr)
-                 (format nil "%d" (sent-offset expr)))))
-        ((eq expr '*) "*")
-        ((symbol-p expr) (symbol-name expr))
-        ((fixnum-p expr) (format nil "%T" expr))
-        ((flonum-p expr) (format nil "0f%T" expr))
-        ((string-p expr) expr)
-        ((atom expr) (clerror "conv-asmconst-to-infix: %t is illegal argument ????" expr))
-        (t (let* ((code (car expr))
-                  (args (cdr expr))
-                  (cargs (mapcar #'conv-asmconst-to-infix args)))
-             (ecase code
-               ((add adda) (apply #'format nil "%T+%T" cargs))
-               ((sub suba) (apply #'format nil (if (consp (cadr args)) "%T-(%T)" "%T-%T") cargs))
-               (neg (apply #'format nil (if (consp (car args)) "-(%T)" "-%T") cargs)))))))
-
-(loadmsg "...")
+(defun emit-acode-end-of-object nil (emit-acode "\nend\n") (when *md-notify-room* (room t)))
+(defun emit-acode-beginning-of-function (name) (emit-acode "\n;;; FUNCTION %T\n" name))
+(defun emit-acode-end-of-function nil (emit-jumpn-tables))
+(defun emit-acode-static-variable (sent value) (if (eq (sent-segment sent) "bss") (progn (unless (eq *current-segment-name* "bss") (emit-acode-changeseg "bss") (setq *current-segment-name* "bss")) (emit-acode "%s%t%d,%d\n" (sent-asmname sent) (if (eq (sent-scc sent) 'global) 'comm 'comm) (sizeof-htype (sent-htype sent)) (sent-align sent)) t) nil))
+(defvar *mdl-emitted-segment-name-list* nil)
+(defun emit-acode-changeseg (segname) (when (and segname (not (eq segname *current-segment-name*))) (emit-acode "%Tgroup\n" segname) (unless (memq segname *mdl-emitted-segment-name-list*) (push segname *mdl-emitted-segment-name-list*) (unless (memq segname '("text" "bss")) (emit-acode-align 4))) (setq *current-segment-name* segname)))
+(defun emit-acode-align (align) (emit-acode "align%d\n" align))
+(defun emit-acode-def (name) (when (sent-p name) (setq name (sent-asmname name))) (emit-acode "%T:\n" name))
+(defun emit-acode-xdef (name) (emit-acode "public%T\n" name) (emit-acode "%T:\n" name))
+(defun emit-acode-extern (name) (emit-acode "extern%T\n" name))
+(defun emit-acode-space (nbyte) (emit-acode "ds%d\n" nbyte))
+(defun emit-acode-zeros (nbyte) (let ((n 0)) (dotimes (b nbyte) (if (zerop (% n 15)) (emit-acode "%ndb") (emit-acode ",")) (emit-acode "0") (incf n)) (emit-acode "\n")))
+(defun emit-acode-string (bytelist) (let ((n 0)) (dolist (b bytelist) (if (zerop (% n 15)) (emit-acode "%ndb") (emit-acode ",")) (emit-acode "%d" b) (incf n)) (emit-acode "\n")))
+(defun emit-acode-data (htype data) (unless (fixnum-p data) (setq data (conv-asmconst-to-infix data))) (ecase htype (i1 (emit-acode "db%T\n" data)) (i2 (emit-acode "dh%T\n" data)) (i4 (emit-acode "dw%T\n" data)) (f4 (emit-acode "dw%T\n" data))))
+(defun emit-acode-jmp-bra (code label) (if *debug* (emit-acode "%t%T\n" code label) (emit-acode (ecase code (jmp-1 "jr%T\n") (jmp-eq "be%T\n") (jmp-ne "bne%T\n") (jmp-lt "blt%T\n") (jmp-ltu "bl%T\n") (jmp-le "ble%T\n") (jmp-leu "bnh%T\n") (jmp-gt "bgt%T\n") (jmp-gtu "bh%T\n") (jmp-ge "bge%T\n") (jmp-geu "bnl%T\n")) label)))
+(defun emit-acode-debug-info-code (info) (ecase (car info) (file (emit-acode "dbsrc%s\n" (cadr info))) (line (emit-acode "dbline%d\n" (cadr info))) (begin (emit-acode "B@%d:\n" (cadr info))) (end (emit-acode "E@%d:\n" (cadr info)))))
+(defun emit-acode-debug-info-scope (sid) (if (zerop sid) (emit-acode "\ndbscope0,0\n") (emit-acode "dbscopeB@%d,E@%d\n" sid sid)))
+(defun emit-acode-debug-info-sent (name class typeid place) (if (eq class 'type) (let ((space (if (consp name) 9 8)) (name (if (consp name) (cadr name) name))) (emit-acode "dbivar%t,%d,%t,0\n" name typeid space)) (progn (emit-acode "dbivar%t,%d,%d," name typeid (ecase class (global 0) (static 1) (lstatic 4) (auto 5) (register 6))) (ecase class ((global static lstatic) (emit-acode "%s" place)) (auto (emit-acode "%d" place)) (register (emit-acode "%s" (substring (symbol-name place) 1 -1)))) (emit-acode "\n"))))
+(defun emit-acode-mcode (mcode) (let ((code (mcode-code mcode)) (args (mcode-args mcode)) (first t)) (emit-acode "%t" code) (dolist (a args) (emit-acode (if first "" ",")) (setq first nil) (cond ((symbol-p a) (emit-acode "%s" (emit-acode-mcode-regname a))) ((fixnum-p a) (emit-acode "%d" a)) (t (ecase (car a) ((i1 i2 i4 f4) (emit-acode "%s" (conv-asmconst-to-infix (cadr a)))) ((sp gp) (emit-acode "%s[%s]" (emit-acode-mcode-offset (cadr a)) (emit-acode-mcode-regname (car a)))) (dx (emit-acode "%s[%s]" (emit-acode-mcode-offset (cadr a)) (emit-acode-mcode-regname (caddr a)))))))) (emit-acode "\n")))
+(defun emit-acode-mcode-offset (o) (if (zerop o) "" (conv-asmconst-to-infix o)))
+(defun emit-acode-mcode-regname (regsym) (let ((regname (symbol-name regsym))) (when (and (not *debug*) (not (memq regsym '(sp gp lp tp)))) (setq regname (substring regname 0 -1))) regname))
+(defun emit-acode-comment (msg) (emit-acode ";; %T\n" msg))
+(defun conv-asmconst-to-infix (expr) (cond ((sent-p expr) (if (eq (sent-sc expr) 'static) (sent-asmname expr) (if *debug* (sent-name expr) (format nil "%d" (sent-offset expr))))) ((eq expr '*) "*") ((symbol-p expr) (symbol-name expr)) ((fixnum-p expr) (format nil "%T" expr)) ((flonum-p expr) (format nil "0f%T" expr)) ((string-p expr) expr) ((atom expr) (clerror "conv-asmconst-to-infix: %t is illegal argument ????" expr)) (t (let* ((code (car expr)) (args (cdr expr)) (cargs (mapcar #'conv-asmconst-to-infix args))) (ecase code ((add adda) (apply #'format nil "%T+%T" cargs)) ((sub suba) (apply #'format nil (if (consp (cadr args)) "%T-(%T)" "%T-%T") cargs)) (neg (apply #'format nil (if (consp (car args)) "-(%T)" "-%T") cargs)))))))(loadmsg "...")
