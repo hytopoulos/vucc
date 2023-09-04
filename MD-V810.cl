@@ -1,4 +1,6 @@
-(setq *md-name* "md-v810")(setq *md-version* "0.1")
+(setq *md-name* "md-v810")
+(setq *md-version* "0.1")
+
 (defun Nall nil (setq *optimize* '(auto-reg stupid-auto-reg v810-peephole)))
 (defun Oall nil (setq *optimize* '(auto-reg jump cse loop delete-zombi v810-peephole)))(setq *md-convit-optimize* nil)(setq *md-stack-align* 4)(setq *md-no-push-pop* t)(setq *md-expand-after-tiling* t)
 (defvar *mdl-Ncse-const* nil)
@@ -17,9 +19,16 @@
 (defvar *mdl-stack-arg-offset* 16)
 (defun md-expand-push-arg (arg argsp) (let* ((htype (expr-htype arg)) (expr (make-expr 'set htype (list (make-expr 'auto 'i4 (+ argsp *mdl-stack-arg-offset*)) arg)))) (cond ((and (fixnum-p htype) (md-expand-setn (car (expr-args expr)) (car (expr-args (cadr (expr-args expr)))) htype))) (t (emit-ccode 'expr expr)))))
 (defun md-expand-pop-args (nbyte))
+
+#| prints loading progress, not very useful with the speed of modern computers |#
 (defun loadmsg (msg &rest args) (when *debug* (apply 'format t msg args)))
+
+#| math shorthand |#
 (defun 2^n-p (n) (= (logcount n) 1))
-(defun log2 (n) (loglength (rshu n 1)))(loadmsg "0")
+(defun log2 (n) (loglength (rshu n 1)))
+
+#| define registers |#
+(loadmsg "0")
 (defreg r10B i1 (conflict r10H r10W r10F))
 (defreg r11B i1 (conflict r11H r11W r11F))
 (defreg r12B i1 (conflict r12H r12W r12F))
@@ -100,12 +109,19 @@
 (defreg r23F f4 (conflict r23B r23H r23W))
 (defreg r24F f4 (conflict r24B r24H r24W))
 (defreg r25F f4 (conflict r25B r25H r25W))
+
+#| CSP = constraint satisfaction problem? |#
 (defcsp B-regs nil (r10B r11B r12B r13B r14B r15B r16B r17B r18B r19B r6B r7B r8B r9B r20B r21B r22B r23B r24B r25B))
 (defcsp H-regs nil (r10H r11H r12H r13H r14H r15H r16H r17H r18H r19H r6H r7H r8H r9H r20H r21H r22H r23H r24H r25H))
 (defcsp W-regs nil (r10W r11W r12W r13W r14W r15W r16W r17W r18W r19W r6W r7W r8W r9W r20W r21W r22W r23W r24W r25W))
 (defcsp F-regs nil (r10F r11F r12F r13F r14F r15F r16F r17F r18F r19F r6F r7F r8F r9F r20F r21F r22F r23F r24F r25F))
-(defcsp W-regs-for-call-general nil (r10W r11W r12W r13W r14W r15W r16W r17W r18W r19W r20W r21W r22W r23W r24W r25W))(setq *md-callee-save-regs* '(r20B r21B r22B r23B r24B r25B r20H r21H r22H r23H r24H r25H r20W r21W r22W r23W r24W r25W r20F r21F r22F r23F r24F r25F))(setq *md-caller-save-regs* '(r6W r7W r8W r9W r11W r12W r13W r14W r15W r16W r17W r18W r19W))
-(defcsp caller-save-regs nil (r6W r7W r8W r9W r11W r12W r13W r14W r15W r16W r17W r18W r19W))(dolist (regs '(B-regs H-regs W-regs F-regs)) (let ((W-regs (cdr (get 'W-regs 'defcsp)))) (dolist (r (cdr (get regs 'defcsp))) (put r 'W-reg (pop W-regs)))))(loadmsg "1")
+(defcsp W-regs-for-call-general nil (r10W r11W r12W r13W r14W r15W r16W r17W r18W r19W r20W r21W r22W r23W r24W r25W))
+(setq *md-callee-save-regs* '())
+#| (setq *md-callee-save-regs* '(r20B r21B r22B r23B r24B r25B r20H r21H r22H r23H r24H r25H r20W r21W r22W r23W r24W r25W r20F r21F r22F r23F r24F r25F)) |#
+(setq *md-caller-save-regs* '(r6W r7W r8W r9W r11W r12W r13W r14W r15W r16W r17W r18W r19W))
+(defcsp caller-save-regs nil (r6W r7W r8W r9W r11W r12W r13W r14W r15W r16W r17W r18W r19W))
+(dolist (regs '(B-regs H-regs W-regs F-regs)) (let ((W-regs (cdr (get 'W-regs 'defcsp)))) (dolist (r (cdr (get regs 'defcsp))) (put r 'W-reg (pop W-regs)))))(loadmsg "1")
+#| addressing mode? |#
 (defcsp am-sp (a) (auto i4 (= a)))
 (defcsp am-const (c) (const i4 (= c * not-gpoffset-p)))
 (defcsp am-gpoffset (g) (const i4 (= g * gpoffset-p)))
@@ -115,7 +131,9 @@
 (defcsp co-fixnum (n) (const * (= n * fixnum-p)))
 (defcsp co-fixnum-2^n-p (n) (const * (= n * 2^n-p)))
 (defcsp co-zero (htype) (const htype (= z * zerop)))
-(defun expr-not-reg-p (expr) (not (eq (expr-car expr) 'reg)))(loadmsg "2")
+(defun expr-not-reg-p (expr) (not (eq (expr-car expr) 'reg)))
+
+(loadmsg "2")
 (defcode getreg (get i1 (= x (reg))) (reg r))
 (defcode getreg (get i2 (= x (reg))) (reg r))
 (defcode getreg (get i4 (= x (reg))) (reg r))
@@ -161,8 +179,20 @@
 (defcode getf4-dx (get f4 am-dx) (reg r x) (gen ((r . F-regs) (x . W-regs)) (ld.w (dx 'd 'x) 'r)))
 (defcode getf4-const (get f4 am-const) (reg r) (gen ((r . F-regs)) (ld.w (dx 'c r0W) 'r)))
 (defcode getf4-gp (get f4 am-gpoffset) (reg r) (gen ((r . F-regs)) (ld.w (gp 'g) 'r)))
-(defcode getf4-sp (get f4 am-sp) (reg r) (gen ((r . F-regs)) (ld.w (sp 'a) 'r)))(loadmsg "4")
-(defcode setn-general (set (= n) (= p) (get * (= q))) (reg nil p q) (gen ((p . W-regs) (q . W-regs)) (mov 'p r29W) (mov r0W r26W) (mov 'q r30W) (mov r0W r27W) (progn (emit-mcode (list 'mov (list 'i4 (* n 8)) 'r28W))) (movbsu)))
+(defcode getf4-sp (get f4 am-sp) (reg r) (gen ((r . F-regs)) (ld.w (sp 'a) 'r)))
+
+(loadmsg "4")
+(defcode setn-general
+    (set (= n) (= p) (get * (= q)))
+    (reg nil p q)
+    (gen
+        ((p . W-regs) (q . W-regs))
+        (mov 'p r29W)
+        (mov r0W r26W)
+        (mov 'q r30W)
+        (mov r0W r27W)
+        (progn (emit-mcode (list 'mov (list 'i4 (* n 8)) 'r28W)))
+        (movbsu)))
 (defcode seti1-general (set i1 (= p (* i4)) (= r)) (reg nil p r) (gen ((p . W-regs) (r . B-regs)) (st.b 'r (dx 0 'p))))
 (defcode seti1-general-zero (set i1 (= p (* i4)) (co-zero i1)) (reg nil p) (gen ((p . W-regs)) (st.b r0B (dx 0 'p))))
 (defcode seti1-dx (set i1 am-dx (= r)) (reg nil x r) (gen ((x . W-regs) (r . B-regs)) (st.b 'r (dx 'd 'x))))
@@ -203,13 +233,20 @@
 (defcode setf4-gp (set f4 am-gpoffset (= r)) (reg nil r) (gen ((r . F-regs)) (st.w 'r (gp 'g))))
 (defcode setf4-gp-zero (set f4 am-gpoffset (co-zero f4)) (reg) (gen nil (st.w r0F (gp 'g))))
 (defcode setf4-sp (set f4 am-sp (= r)) (reg nil r) (gen ((r . F-regs)) (st.w 'r (sp 'a))))
-(defcode setf4-sp-zero (set f4 am-sp (co-zero f4)) (reg) (gen nil (st.w r0F (sp 'a))))(loadmsg "5")
+(defcode setf4-sp-zero (set f4 am-sp (co-zero f4)) (reg) (gen nil (st.w r0F (sp 'a))))
+
+(loadmsg "5")
 (defcode consti1-general (const i1 (= c)) (reg r) (gen ((r . B-regs)) (mov (i1 'c) 'r)))
 (defcode consti2-general (const i2 (= c)) (reg r) (gen ((r . H-regs)) (mov (i2 'c) 'r)))
 (defcode consti4-general (const i4 (= c)) (reg r) (gen ((r . W-regs)) (mov (i4 'c) 'r)))
 (defcode constf4-general (const f4 (= c)) (reg r) (gen ((r . F-regs)) (mov (f4 'c) 'r)))
-(defcode consti4-zero (const i4 (= c * fixnum-p)) (con (zerop c)) (reg r) (gen ((r . W-regs)) (mov r0W 'r)))(loadmsg "6")
-(defcode auto-general (auto i4 (= a)) (reg r) (gen ((r . W-regs)) (movea (i4 'a) sp 'r)))(loadmsg "7")
+(defcode consti4-zero (const i4 (= c * fixnum-p)) (con (zerop c)) (reg r) (gen ((r . W-regs)) (mov r0W 'r)))
+
+(loadmsg "6")
+(defcode auto-general (auto i4 (= a)) (reg r) (gen ((r . W-regs)) (movea (i4 'a) sp 'r)))
+
+#| type conversions |#
+(loadmsg "7")
 (defcode convsxi2/i1-general (convsx i2 (= s (* i1))) (reg r s) (gen ((r . H-regs) (s . B-regs)) (mov 's 'r)))
 (defcode convzxi2/i1-general (convzx i2 (= s (* i1))) (reg r s) (gen ((r . H-regs) (s . B-regs)) (andi (i2 255) 's 'r)))
 (defcode convsxi4/i1-general (convsx i4 (= s (* i1))) (reg r s) (gen ((r . W-regs) (s . B-regs)) (mov 's 'r)))
@@ -240,7 +277,9 @@
 (defcode convsi2/f4-general (convsi i2 (= s (* f4))) (reg r s) (gen ((r . H-regs) (s . F-regs)) (cvt.sw 's 'r) (shl 16 'r) (sar 16 'r)))
 (defcode convui2/f4-general (convui i2 (= s (* f4))) (reg r s) (gen ((r . H-regs) (s . F-regs)) (cvt.sw 's 'r) (shl 16 'r) (sar 16 'r)))
 (defcode convsi4/f4-general (convsi i4 (= s (* f4))) (reg r s) (gen ((r . W-regs) (s . F-regs)) (cvt.sw 's 'r)))
-(defcode convui4/f4-general (convui i4 (= s (* f4))) (reg r s) (gen ((r . W-regs) (s . F-regs)) (cvt.sw 's 'r)))(loadmsg "8")
+(defcode convui4/f4-general (convui i4 (= s (* f4))) (reg r s) (gen ((r . W-regs) (s . F-regs)) (cvt.sw 's 'r)))
+
+(loadmsg "8")
 (defcode negi4-general (neg i4 (= r)) (reg r r) (gen ((r . W-regs)) (not 'r 'r) (add (i4 1) 'r)))
 (defcode negf4-general (neg f4 (= r)) (reg r r) (gen ((r . F-regs)) (mov r0F r30F) (subf.s 'r r30F) (mov r30F 'r)))
 (defcode addi4-general (add i4 (= r) (= p)) (reg r r p) (gen ((r . W-regs) (p . W-regs)) (add 'p 'r)))
@@ -272,7 +311,9 @@
 (defcode rshi4-general (rsh i4 (= r) (= s)) (reg r r s) (gen ((r . W-regs) (s . W-regs)) (sar 's 'r)))
 (defcode rshi4-const (rsh i4 (= r) (co-fixnum c)) (reg r r) (gen ((r . W-regs)) (sar (i4 'c) 'r)))
 (defcode rshui4-general (rshu i4 (= r) (= s)) (reg r r s) (gen ((r . W-regs) (s . W-regs)) (shr 's 'r)))
-(defcode rshui4-general (rshu i4 (= r) (co-fixnum c)) (reg r r) (gen ((r . W-regs)) (shr (i4 'c) 'r)))(loadmsg "9")
+(defcode rshui4-general (rshu i4 (= r) (co-fixnum c)) (reg r r) (gen ((r . W-regs)) (shr (i4 'c) 'r)))
+
+(loadmsg "9")
 (defcsp jcode (jmc) (= jmc * ((tsteq jmp-eq) (tstne jmp-ne) (tstlt jmp-lt) (tstltu jmp-ltu) (tstle jmp-le) (tstleu jmp-leu) (tstgt jmp-gt) (tstgtu jmp-gtu) (tstge jmp-ge) (tstgeu jmp-geu))))
 (defcode jump1 (jump1 la) (gen nil (jmp-1 'la)))
 (defcode jump2i4-general (jump2 ((jcode jmc) * (= r (* i4)) (= p (* i4))) la) (reg nil r p) (gen ((r . W-regs) (p . W-regs)) (cmp 'p 'r) ('jmc 'la)))
@@ -282,7 +323,7 @@
 (defun emit-jumpn (reg calist) (dolist (c calist) (setq (sent-scc (cadr c)) 'caselabel)) (let ((dlabel (genlabel))) (setq (sent-scc dlabel) 'caselabel) (emit-jumpn-rec reg calist dlabel) (emit-mcode (list 'def dlabel))))
 (defun emit-jumpn-rec (reg calist dlabel) (cond ((emit-jumpn-by-table-p calist) (emit-jumpn-by-table reg calist dlabel)) ((emit-jumpn-by-liner-p calist) (emit-jumpn-by-liner reg calist dlabel)) (t (let ((tmpl (genlabel))) (letl (calist1 center calist2) (emit-jumpn-split-calist calist) (emit-mcode (list 'cmp (list 'i4 (car center)) reg)) (emit-mcode (list 'jmp-eq (cadr center))) (emit-mcode (list 'jmp-gt tmpl)) (emit-jumpn-rec reg calist1 dlabel) (emit-mcode (list 'def tmpl)) (emit-jumpn-rec reg calist2 dlabel))))))
 (defun emit-jumpn-by-table-p (calist) (let ((min (caar calist)) (max (caar (last calist))) (len (length calist))) (and (<= 5 len) (<= (- max min) (* 3 len)))))
-(defun emit-jumpn-by-liner-p (calist) (<= (length calist) 2))
+(defun emit-jumpn-by-liner-p (calist) (<= (length calist) 2)) #| emit linear jumps if <= 2 |#
 (defun emit-jumpn-by-liner (reg calist dlabel) (dolist (c calist) (emit-mcode (list 'cmp (list 'i4 (car c)) reg)) (emit-mcode (list 'jmp-eq (cadr c)))) (when dlabel (emit-mcode (list 'jmp-1 dlabel))))
 (defun emit-jumpn-split-calist (calist) (let ((len (length calist)) x y) (unless (<= 3 len) (clerror "emit-jumpn-split-calist: unexpedted list length")) (setq y (nthcdr (/ len 2) calist) x (ldiff calist y)) (list x (car y) (cdr y))))
 (defvar *mdl-jumpn-table-id* 0)
@@ -290,14 +331,70 @@
 (defun emit-jumpn-by-table (reg calist dlabel) (let ((min (caar calist)) (max (caar (last calist))) table) (cond ((zerop min) (emit-mcode (list 'mov reg 'r30W))) (t (decf max min) (emit-mcode (list 'addi (list 'i4 (- min)) reg 'r30W)) (dolist (c calist) (decf (car c) min)))) (setq table (make-jumpn-table calist dlabel)) (emit-mcode (list 'cmp (list 'i4 max) 'r30W)) (emit-mcode (list 'jmp-gtu dlabel)) (emit-mcode '(shl (i4 2) r30W)) (emit-mcode (list 'ld.w (list 'dx table 'r30W) 'r30W)) (emit-mcode '(jmp (dx 0 r30W)))))
 (defun make-jumpn-table (calist dlabel) (let ((tlabel (genlabel)) (table (make-tconc)) (n 0)) (setq (sent-asmname tlabel) (format nil "LS%d" (incf *mdl-jumpn-table-id*))) (dolist (c calist) (while (< n (car c)) (tconc table dlabel) (incf n)) (tconc table (cadr c)) (incf n)) (push (cons tlabel (tconc-list table)) *mdl-jumpn-table-list*) tlabel))
 (defun emit-jumpn-tables nil (dolist (table *mdl-jumpn-table-list*) (emit-acode-changeseg "const") (emit-acode-align 4) (emit-acode-def (sent-asmname (car table))) (dolist (e (cdr table)) (emit-acode-data 'i4 e))) (setq *mdl-jumpn-table-list* nil))
-(defcode label (label la) (gen nil 
-(def 'la)))(loadmsg "a")(extern *cfun-name* *cfun-args-htype* *cfun-return-htype* *cfun-ahtype* *cfun-param-list* *cfun-local-list* *cfun-local-size* *cfun-tmp-list* *cfun-tmp-size* *cfun-args-size* *cfun-is-leaf-p*)
+(defcode label (label la) (gen nil (def 'la)))
+
+(loadmsg "a")
+(extern *cfun-name* *cfun-args-htype* *cfun-return-htype* *cfun-ahtype* *cfun-param-list* *cfun-local-list* *cfun-local-size* *cfun-tmp-list* *cfun-tmp-size* *cfun-args-size* *cfun-is-leaf-p*)
 (defvar *mdl-frame-size* 0)
 (defvar *mdl-arg* 0)
 (defvar *mdl-hreg-save-area* 0)
 (defvar *mdl-hreg-save-area-size* 0)
-(defcode prologue (prologue) (gen nil (progn (let ((frame (if *cfun-is-leaf-p* 0 *mdl-stack-arg-offset*))) (setq *mdl-arg* frame) (incf frame *cfun-args-size*) (dolist (s *cfun-local-list*) (incf (sent-offset s) frame)) (incf frame *cfun-local-size*) (dolist (s *cfun-tmp-list*) (incf (sent-offset s) frame)) (incf frame *cfun-tmp-size*) (let (res) (dolist (r *cfun-hreg-list*) (setq r (get r 'W-reg)) (unless (memq r res) (push r res))) (setq *cfun-hreg-list* res)) (setq *cfun-hreg-list* (delq 'r10W *cfun-hreg-list*)) (dolist (reg *md-caller-save-regs*) (setq *cfun-hreg-list* (delq reg *cfun-hreg-list*))) (setq *mdl-hreg-save-area* frame *mdl-hreg-save-area-size* (* 4 (length *cfun-hreg-list*))) (incf frame *mdl-hreg-save-area-size*) (unless *cfun-is-leaf-p* (incf frame 4)) (setq *mdl-frame-size* frame) (dolist (s *cfun-param-list*) (incf (sent-offset s) (+ *mdl-frame-size* *mdl-stack-arg-offset*))))) (progn (emit-mcode 'comment (format nil "framesize %d = %d(args) + %d(local) + %d(tmp) + %d(saveregs) + %d(savelp)" *mdl-frame-size* *cfun-args-size* *cfun-local-size* *cfun-tmp-size* *mdl-hreg-save-area-size* (if *cfun-is-leaf-p* 0 4))) (emit-mcode 'comment (format nil "used callee save regs = %t" *cfun-hreg-list*)) (dolist (s *cfun-param-list*) (emit-mcode 'comment (format nil "param %T = (auto %d)" (sent-name s) (sent-offset s)))) (dolist (s *cfun-local-list*) (emit-mcode 'comment (format nil "local %T = (auto %d)" (sent-name s) (sent-offset s)))) (dolist (s *cfun-tmp-list*) (emit-mcode 'comment (format nil "tmp   %T = (auto %d)" (sent-name s) (sent-offset s))))) (progn (unless (zerop *mdl-frame-size*) (emit-mcode (list 'add (list 'i4 (- *mdl-frame-size*)) 'sp))) (unless *cfun-is-leaf-p* (emit-mcode (list 'st.w 'lp (list 'sp (list 'sub *mdl-frame-size* 4))))) (unless (zerop *mdl-hreg-save-area-size*) (let ((off *mdl-hreg-save-area*)) (dolist (reg *cfun-hreg-list*) (emit-mcode (list 'st.w reg (list 'sp (posincf off 4))))))))))
-(defcode epilogue (epilogue) (gen nil (progn (unless *cfun-is-leaf-p* (emit-mcode (list 'ld.w (list 'sp (list 'sub *mdl-frame-size* 4)) 'lp))) (unless (zerop *mdl-hreg-save-area-size*) (let ((off *mdl-hreg-save-area*)) (dolist (reg *cfun-hreg-list*) (emit-mcode (list 'ld.w (list 'sp (posincf off 4)) reg))))) (unless (zerop *mdl-frame-size*) (emit-mcode (list 'add (list 'i4 *mdl-frame-size*) 'sp)))) (jmp (dx 0 lp))))
+
+(defcode prologue (prologue)
+    (gen nil
+    (progn
+        #| calculate stack etc |#
+        (let ((frame (if *cfun-is-leaf-p* 0 *mdl-stack-arg-offset*)))
+            (setq *mdl-arg* frame)
+            (incf frame *cfun-args-size*)
+            (dolist (s *cfun-local-list*) (incf (sent-offset s) frame))
+            (incf frame *cfun-local-size*)
+            (dolist (s *cfun-tmp-list*) (incf (sent-offset s) frame))
+            (incf frame *cfun-tmp-size*)
+            (let (res)
+                (dolist (r *cfun-hreg-list*) (setq r (get r 'W-reg))
+                    (unless (memq r res) (push r res)))
+                (setq *cfun-hreg-list* res))
+            (setq *cfun-hreg-list* (delq 'r10W *cfun-hreg-list*))
+            (dolist (reg *md-caller-save-regs*) (setq *cfun-hreg-list* (delq reg *cfun-hreg-list*)))
+            (setq *mdl-hreg-save-area* frame *mdl-hreg-save-area-size* (* 4 (length *cfun-hreg-list*)))
+            (incf frame *mdl-hreg-save-area-size*)
+            (unless *cfun-is-leaf-p* (incf frame 4))
+            (setq *mdl-frame-size* frame)
+            (dolist (s *cfun-param-list*)
+                (incf (sent-offset s) (+ *mdl-frame-size* *mdl-stack-arg-offset*)))))
+        #| print info |#
+        (progn
+            (emit-mcode 'comment (format nil "framesize %d = %d(args) + %d(local) + %d(tmp) + %d(saveregs) + %d(savelp)" *mdl-frame-size* *cfun-args-size* *cfun-local-size* *cfun-tmp-size* *mdl-hreg-save-area-size* (if *cfun-is-leaf-p* 0 4)))
+            (emit-mcode 'comment (format nil "used callee save regs = %t" *cfun-hreg-list*))
+            (dolist (s *cfun-param-list*) (emit-mcode 'comment (format nil "param %T = (auto %d)" (sent-name s) (sent-offset s))))
+            (dolist (s *cfun-local-list*) (emit-mcode 'comment (format nil "local %T = (auto %d)" (sent-name s) (sent-offset s))))
+            (dolist (s *cfun-tmp-list*) (emit-mcode 'comment (format nil "tmp   %T = (auto %d)" (sent-name s) (sent-offset s)))))
+        #| emit code |#
+        (progn
+            (emit-mcode (list 'REP.b 31))
+            (unless (zerop *mdl-frame-size*)
+                (emit-mcode 'PHD)
+                (emit-mcode 'PHA)
+                (emit-mcode 'TDC)
+                (emit-mcode (list 'ADC.w (- *mdl-frame-size*)))
+                (emit-mcode 'TCD)
+                (emit-mcode 'PLA)
+                )
+            #| (unless (zerop *mdl-frame-size*) (emit-mcode (list 'add (list 'i4 (- *mdl-frame-size*)) 'sp))) |#
+            #| (unless *cfun-is-leaf-p* (emit-mcode (list 'st.w 'lp (list 'sp (list 'sub *mdl-frame-size* 4))))) |#
+            #| (unless (zerop *mdl-hreg-save-area-size*) (let ((off *mdl-hreg-save-area*)) (dolist (reg *cfun-hreg-list*) (emit-mcode (list 'st.w reg (list 'sp (posincf off 4))))))) |#
+            )))
+
+(defcode epilogue (epilogue)
+    (gen nil
+    (progn
+        #| (unless *cfun-is-leaf-p* (emit-mcode (list 'ld.w (list 'sp (list 'sub *mdl-frame-size* 4)) 'lp))) |#
+        #| (unless (zerop *mdl-hreg-save-area-size*) (let ((off *mdl-hreg-save-area*)) (dolist (reg *cfun-hreg-list*) (emit-mcode (list 'ld.w (list 'sp (posincf off 4)) reg))))) |#
+        #| (unless (zerop *mdl-frame-size*) (emit-mcode (list 'add (list 'i4 *mdl-frame-size*) 'sp)))) |#
+        (unless (zerop *mdl-frame-size*) (emit-mcode 'PLD)))
+    (RTL)))
+
 (defcode pusharg (set i1 (arg) (= x)) (reg nil x) (gen ((x . B-regs)) (progn (emit-mcode (list 'st.b x (list 'sp *mdl-arg*))) (setq *mdl-arg* (+ *mdl-arg* 4)))))
 (defcode pusharg (set i2 (arg) (= x)) (reg nil x) (gen ((x . H-regs)) (progn (emit-mcode (list 'st.h x (list 'sp *mdl-arg*))) (setq *mdl-arg* (+ *mdl-arg* 4)))))
 (defcode pusharg (set i4 (arg) (= x)) (reg nil x) (gen ((x . W-regs)) (progn (emit-mcode (list 'st.w x (list 'sp *mdl-arg*))) (setq *mdl-arg* (+ *mdl-arg* 4)))))
@@ -308,16 +405,23 @@
 (defcode calli4-general (call i4 (= f)) (reg r f) (gen ((r r10W) (f . W-regs-for-call-general) (use . caller-save-regs)) (mov (i4 (add * 10)) lp) (jmp (dx 0 'f))))
 (defcode callf4-general (call f4 (= f)) (reg r f) (gen ((r r10F) (f . W-regs-for-call-general) (use . caller-save-regs)) (mov (i4 (add * 10)) lp) (jmp (dx 0 'f))))
 (defcode callvoid-general (call void (= f)) (reg r f) (gen ((r r10W) (f . W-regs-for-call-general) (use . caller-save-regs)) (mov (i4 (add * 10)) lp) (jmp (dx 0 'f))))
-(defcode calli1-const (call i1 (const i4 (= f))) (reg r) (gen ((r r10B) (use . caller-save-regs)) (jal (i4 'f))))
-(defcode calli2-const (call i2 (const i4 (= f))) (reg r) (gen ((r r10H) (use . caller-save-regs)) (jal (i4 'f))))
-(defcode calli4-const (call i4 (const i4 (= f))) (reg r) (gen ((r r10W) (use . caller-save-regs)) (jal (i4 'f))))
-(defcode callf4-const (call f4 (const i4 (= f))) (reg r) (gen ((r r10F) (use . caller-save-regs)) (jal (i4 'f))))
-(defcode callvoid-const (call void (const i4 (= f))) (reg r) (gen ((r r10W) (use . caller-save-regs)) (jal (i4 'f))))
+(defcode calli1-const (call i1 (const i4 (= f))) (reg r) (gen ((r r10B) (use . caller-save-regs)) (JSL.l (i4 'f))))
+(defcode calli2-const (call i2 (const i4 (= f))) (reg r) (gen ((r r10H) (use . caller-save-regs)) (JSL.l (i4 'f))))
+(defcode calli4-const (call i4 (const i4 (= f))) (reg r) (gen ((r r10W) (use . caller-save-regs)) (JSL.l (i4 'f))))
+(defcode callf4-const (call f4 (const i4 (= f))) (reg r) (gen ((r r10F) (use . caller-save-regs)) (JSL.l (i4 'f))))
+(defcode callvoid-const (call void (const i4 (= f))) (reg r) (gen ((r r10W) (use . caller-save-regs)) (JSL.l (i4 'f))))
 (defcode ret-i1 (set i1 (ret) (= r)) (reg nil r) (gen ((r r10B))))
 (defcode ret-i2 (set i2 (ret) (= r)) (reg nil r) (gen ((r r10H))))
 (defcode ret-i4 (set i4 (ret) (= r)) (reg nil r) (gen ((r r10W))))
-(defcode ret-f4 (set f4 (ret) (= r)) (reg nil r) (gen ((r r10F))))(loadmsg "b")
-(defun peephole-optimize (bblockh))(load "md-v810p.cl")(setq *mcode-bra-offset* nil)(loadmsg "c")(setq *md-no-underscore* nil)
+(defcode ret-f4 (set f4 (ret) (= r)) (reg nil r) (gen ((r r10F))))
+
+(loadmsg "b")
+(defun peephole-optimize (bblockh))
+(load "md-v810p.cl")
+(setq *mcode-bra-offset* nil)
+
+(loadmsg "c")
+(setq *md-no-underscore* nil)
 (defvar *mdl-lstatic/string-id* 0)
 (defun make-asm-name (name class) (ecase class ((extern global static) (if *md-no-underscore* name (format nil "_%s" name))) (lstatic (format nil "%s@%d" name (incf *mdl-lstatic/string-id*))) (string (format nil "%s@%d" name (incf *mdl-lstatic/string-id*)))))
 (defun emit-acode-beginning-of-object nil (setq *mdl-float-literal-alist* nil *mdl-float-literal-id* 0) (emit-acode ";;; source = %T\n" (file-name-change-suffix (stream-name *objsm*) ".c")) (emit-acode ";;; cparse = (%T %T %T)\n" *cparse-version* *ld-name* *ld-version*) (emit-acode ";;; cgrind = (%T %T %T)\n" *cgrind-version* *md-name* *md-version*) (dolist (sym '(*command-line-args* *optimize* *debug*)) (let ((vals (symbol-value sym))) (when vals (emit-acode ";;; %t = (" sym) (dolist (a vals) (emit-acode "\n;;;     %t" a)) (emit-acode ")\n")))) (emit-acode "\n") (emit-acode "isv810\n") (emit-acode "rsvreg1\n") (emit-acode "capsoff\n") (emit-acode "aligndefeven\n") (emit-acode "lprefix' '\n") (emit-acode "decon   branch\n") (emit-acode "oncnum\n") (if *gp-offset* (emit-acode "assumegp,$%x\n" *gp-offset*) (progn (emit-acode "externgp_offset\n") (emit-acode "assumegp,gp_offset\n"))) (when *debugger* (emit-acode-debug-info-type)) (emit-acode "\n"))
@@ -336,13 +440,47 @@
 (defun emit-acode-space (nbyte) (emit-acode "ds%d\n" nbyte))
 (defun emit-acode-zeros (nbyte) (let ((n 0)) (dotimes (b nbyte) (if (zerop (% n 15)) (emit-acode "%ndb") (emit-acode ",")) (emit-acode "0") (incf n)) (emit-acode "\n")))
 (defun emit-acode-string (bytelist) (let ((n 0)) (dolist (b bytelist) (if (zerop (% n 15)) (emit-acode "%ndb") (emit-acode ",")) (emit-acode "%d" b) (incf n)) (emit-acode "\n")))
-(defun emit-acode-data (htype data) (unless (fixnum-p data) (setq data (conv-asmconst-to-infix data))) (ecase htype (i1 (emit-acode "db%T\n" data)) (i2 (emit-acode "dh%T\n" data)) (i4 (emit-acode "dw%T\n" data)) (f4 (emit-acode "dw%T\n" data))))
-(defun emit-acode-jmp-bra (code label) (if *debug* (emit-acode "%t%T\n" code label) (emit-acode (ecase code (jmp-1 "jr%T\n") (jmp-eq "be%T\n") (jmp-ne "bne%T\n") (jmp-lt "blt%T\n") (jmp-ltu "bl%T\n") (jmp-le "ble%T\n") (jmp-leu "bnh%T\n") (jmp-gt "bgt%T\n") (jmp-gtu "bh%T\n") (jmp-ge "bge%T\n") (jmp-geu "bnl%T\n")) label)))
+(defun emit-acode-data (htype data)
+    (unless (fixnum-p data) (setq data (conv-asmconst-to-infix data)))
+    (ecase htype
+        (i1 (emit-acode "db%T\n" data))
+        (i2 (emit-acode "dh%T\n" data))
+        (i4 (emit-acode "dw%T\n" data))
+        (f4 (emit-acode "dw%T\n" data))))
+
+(defun emit-acode-jmp-bra (code label)
+    (if *debug* (emit-acode "%t%T\n" code label)
+    (emit-acode
+        (ecase code
+            (jmp-1 "jr%T\n")
+            (jmp-eq "be%T\n")
+            (jmp-ne "bne%T\n")
+            (jmp-lt "blt%T\n")
+            (jmp-ltu "bl%T\n")
+            (jmp-le "ble%T\n")
+            (jmp-leu "bnh%T\n")
+            (jmp-gt "bgt%T\n")
+            (jmp-gtu "bh%T\n")
+            (jmp-ge "bge%T\n")
+            (jmp-geu "bnl%T\n"))
+        label)))
 (defun emit-acode-debug-info-code (info) (ecase (car info) (file (emit-acode "dbsrc%s\n" (cadr info))) (line (emit-acode "dbline%d\n" (cadr info))) (begin (emit-acode "B@%d:\n" (cadr info))) (end (emit-acode "E@%d:\n" (cadr info)))))
 (defun emit-acode-debug-info-scope (sid) (if (zerop sid) (emit-acode "\ndbscope0,0\n") (emit-acode "dbscopeB@%d,E@%d\n" sid sid)))
 (defun emit-acode-debug-info-sent (name class typeid place) (if (eq class 'type) (let ((space (if (consp name) 9 8)) (name (if (consp name) (cadr name) name))) (emit-acode "dbivar%t,%d,%t,0\n" name typeid space)) (progn (emit-acode "dbivar%t,%d,%d," name typeid (ecase class (global 0) (static 1) (lstatic 4) (auto 5) (register 6))) (ecase class ((global static lstatic) (emit-acode "%s" place)) (auto (emit-acode "%d" place)) (register (emit-acode "%s" (substring (symbol-name place) 1 -1)))) (emit-acode "\n"))))
-(defun emit-acode-mcode (mcode) (let ((code (mcode-code mcode)) (args (mcode-args mcode)) (first t)) (emit-acode "%t" code) (dolist (a args) (emit-acode (if first "" ",")) (setq first nil) (cond ((symbol-p a) (emit-acode "%s" (emit-acode-mcode-regname a))) ((fixnum-p a) (emit-acode "%d" a)) (t (ecase (car a) ((i1 i2 i4 f4) (emit-acode "%s" (conv-asmconst-to-infix (cadr a)))) ((sp gp) (emit-acode "%s[%s]" (emit-acode-mcode-offset (cadr a)) (emit-acode-mcode-regname (car a)))) (dx (emit-acode "%s[%s]" (emit-acode-mcode-offset (cadr a)) (emit-acode-mcode-regname (caddr a)))))))) (emit-acode "\n")))
+(defun emit-acode-mcode (mcode)
+    (let ((code (mcode-code mcode)) (args (mcode-args mcode)) (first t))
+        (emit-acode "%t" code)
+        (dolist (a args)
+            (emit-acode (if first "" ","))
+            (setq first nil)
+            (cond ((symbol-p a) (emit-acode "%s" (emit-acode-mcode-regname a))) ((fixnum-p a) (emit-acode "#$%d" a))
+                (t (ecase (car a)
+                    ((i1 i2 i4 f4) (emit-acode "#$%s" (conv-asmconst-to-infix (cadr a))))
+                    ((sp gp) (emit-acode "%s[%s]" (emit-acode-mcode-offset (cadr a)) (emit-acode-mcode-regname (car a))))
+                    (dx (emit-acode "%s[%s]" (emit-acode-mcode-offset (cadr a)) (emit-acode-mcode-regname (caddr a))))))))
+        (emit-acode "\n")))
 (defun emit-acode-mcode-offset (o) (if (zerop o) "" (conv-asmconst-to-infix o)))
 (defun emit-acode-mcode-regname (regsym) (let ((regname (symbol-name regsym))) (when (and (not *debug*) (not (memq regsym '(sp gp lp tp)))) (setq regname (substring regname 0 -1))) regname))
 (defun emit-acode-comment (msg) (emit-acode ";; %T\n" msg))
-(defun conv-asmconst-to-infix (expr) (cond ((sent-p expr) (if (eq (sent-sc expr) 'static) (sent-asmname expr) (if *debug* (sent-name expr) (format nil "%d" (sent-offset expr))))) ((eq expr '*) "*") ((symbol-p expr) (symbol-name expr)) ((fixnum-p expr) (format nil "%T" expr)) ((flonum-p expr) (format nil "0f%T" expr)) ((string-p expr) expr) ((atom expr) (clerror "conv-asmconst-to-infix: %t is illegal argument ????" expr)) (t (let* ((code (car expr)) (args (cdr expr)) (cargs (mapcar #'conv-asmconst-to-infix args))) (ecase code ((add adda) (apply #'format nil "%T+%T" cargs)) ((sub suba) (apply #'format nil (if (consp (cadr args)) "%T-(%T)" "%T-%T") cargs)) (neg (apply #'format nil (if (consp (car args)) "-(%T)" "-%T") cargs)))))))(loadmsg "...")
+(defun conv-asmconst-to-infix (expr) (cond ((sent-p expr) (if (eq (sent-sc expr) 'static) (sent-asmname expr) (if *debug* (sent-name expr) (format nil "%d" (sent-offset expr))))) ((eq expr '*) "*") ((symbol-p expr) (symbol-name expr)) ((fixnum-p expr) (format nil "%T" expr)) ((flonum-p expr) (format nil "0f%T" expr)) ((string-p expr) expr) ((atom expr) (clerror "conv-asmconst-to-infix: %t is illegal argument ????" expr)) (t (let* ((code (car expr)) (args (cdr expr)) (cargs (mapcar #'conv-asmconst-to-infix args))) (ecase code ((add adda) (apply #'format nil "%T+%T" cargs)) ((sub suba) (apply #'format nil (if (consp (cadr args)) "%T-(%T)" "%T-%T") cargs)) (neg (apply #'format nil (if (consp (car args)) "-(%T)" "-%T") cargs)))))))
+(loadmsg "...")
