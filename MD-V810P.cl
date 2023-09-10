@@ -8,10 +8,15 @@
 
 (defun get-regno (regsym) (get regsym 'regno))
 (defun peephole-optimize (bblockh)
-    (when (memq 'v810-peephole *optimize*)
+
+#| replace below with (sf-peep bblockh) |#
+
+(when (memq 'v810-peephole *optimize*)
         (when (memq 'peephole *debug*)
             (format t "=== v810-peephole\n"))
-        (do-bblock (b bblockh) (peep-mcode (bblock-mcode b)))))
+        (do-bblock (b bblockh) (peep-mcode (bblock-mcode b))))
+
+)
 
 (defun delete-mcode (m)
     (setq (mcode-next (mcode-prev m)) (mcode-next m) (mcode-prev (mcode-next m)) (mcode-prev m))
@@ -20,7 +25,7 @@
     nil)
 
 (defvar *z-flag-set-code* '(add addf.s addi and andi caxi cmp cmpf.s cvt.ws cvt.sw div divf.s divu ldsr mul mulf.s mulu not or ori reti sar sch0bsu sch0bsd shl shr sub subf.s trnc.sw xor xori))
-(defvar *z-flag-reset-code* '(in.b in.h in.w ld.b ld.h ld.w mov movea movhi setf))
+(defvar *z-flag-reset-code* '(in.b in.h in.w lda.b lda.h ld.w mov movea movhi setf))
 (defvar *z-flag-jmp-reset-code* '(jal jmp jmp-eq jmp-ne jmp-lt jmp-ltu jmp-le jmp-leu jmp-gt jmp-gtu jmp-ge jmp-geu))
 
 (defun peep-mcode (mcodeh)
@@ -51,5 +56,5 @@
         ((addi andi xori) (get-regno (caddr args)))
         ((sch0bsu sch0bsd reti) nil)))
 (defun z-flag-reset-code (code args)
-    (ecase code ((in.b in.h in.w ld.b ld.h ld.w mov movhi setf) (get-regno (cadr args)))
+    (ecase code ((in.b in.h in.w lda.b lda.h ld.w mov movhi setf) (get-regno (cadr args)))
         ((movea) (get-regno (caddr args)))))
