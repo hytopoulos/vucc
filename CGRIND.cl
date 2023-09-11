@@ -5,6 +5,7 @@
 (extern *cfun-name*)
 (push 'confirm-move-optimize-in-fixup-hreg *debug*)
 (setq *gc-control* 200000 *notify-gc* nil)
+(setq *dump-file-name* "dump.txt")
 
 (defun cgrind-bblock (bblockh)
     (if *debug* (cgrind-bblock-debug bblockh)
