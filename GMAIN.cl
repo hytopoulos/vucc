@@ -5,7 +5,7 @@
 
 (defun main (args)
     #| comment below to enable debugging |#
-    #| (setq *debug* nil *notify-gc* nil) |#
+    (setq *debug* nil *notify-gc* nil)
     (cond ((= (length args) 1) (xerror *usage* (car args)))
         (t (setq args (cdr args)) (let (scodef objf a room)
         (while (setq a (pop args)) (if (= (sref a 0) 45)

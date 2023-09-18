@@ -42,7 +42,7 @@ types:
 
 (defun Nall nil (setq *optimize* '(auto-reg stupid-auto-reg v810-peephole)))
 (defun Oall nil (setq *optimize* '(auto-reg jump cse loop delete-zombi v810-peephole)))
-(setq *md-convit-optimize* nil)
+(setq *md-convit-optimize* t)
 (setq *md-stack-align* 2)
 (setq *md-no-push-pop* t)
 (setq *md-expand-after-tiling* t)
@@ -50,9 +50,9 @@ types:
 (defvar *mdl-Ncse-global* nil)
 (defun Ncse-const nil (setq *mdl-Ncse-const* t))
 (defun Ncse-global nil (setq *mdl-Ncse-global* t))
+(defun areg-p (x) (eq (substring (symbol-name x) 0 1) "a"))
 (defun xreg-p (x) (eq (substring (symbol-name x) 0 1) "x"))
 (defun yreg-p (x) (eq (substring (symbol-name x) 0 1) "y"))
-(defun areg-p (x) (eq (substring (symbol-name x) 0 1) "a"))
 (defun md-cse-const-p (expr &optional nrecomp)
     (cond (*mdl-Ncse-const* 'ignore) ((<= nrecomp 3) 'ignore) ((expr-zero-p expr) 'ignore)
         ((let ((val (expr-value expr)))
@@ -69,7 +69,7 @@ types:
 (defun md-expand-setn-add-offset (x offset) (cond ((sent-p x) (make-expr 'add 'i4 (list (make-expr-get-reg x) (make-expr 'const 'i4 offset)))) (t (make-expr 'add 'i4 (list (copy-expr-all x) (make-expr 'const 'i4 offset))))))
 (defun md-expand-get-bitfield (expr tlabel flabel voidp) (let* ((bit (car (expr-args expr))) (signedp (eq (expr-car bit) 'bit)) (beg (expr-value (cadr (expr-args bit)))) (width (expr-value (caddr (expr-args bit))))) (setq (car (expr-args expr)) (car (expr-args bit))) (expand-expr-1 (cond ((and (zerop beg) (not signedp)) (make-expr 'band 'i4 (list expr (make-expr-const 'i4 (unsigned-int -1 width))))) (t (make-expr (if signedp 'rsh 'rshu) 'i4 (list (make-expr 'lsh 'i4 (list expr (make-expr-const 'i4 (- 32 (+ beg width))))) (make-expr-const 'i4 (- 32 width)))))) tlabel flabel voidp)))
 (defun md-expand-set-bitfield (expr tlabel flabel voidp) (let* ((bit (car (expr-args expr))) (y (cadr (expr-args expr))) (p (car (expr-args bit))) (beg (cadr (expr-args bit))) (width (caddr (expr-args bit))) (reg (genreg 'i4)) (mask1 (lsh (unsigned-int -1 (expr-value width)) (expr-value beg))) p0) (emit-ccode 'expr (make-expr-set-reg reg (make-expr 'band 'i4 (list (make-expr 'lsh 'i4 (list y beg)) (make-expr-const 'i4 mask1))))) (setq p0 (expand-expr-1 p)) (emit-ccode 'expr (make-expr 'set 'i4 (list p0 (make-expr 'bor 'i4 (list (make-expr 'band 'i4 (list (make-expr 'get 'i4 (list p0)) (make-expr-const 'i4 (bnot mask1)))) (make-expr-get-reg reg)))))) (make-expr-get-reg reg)))
-(defvar *mdl-stack-arg-offset* 2)
+(defvar *mdl-stack-arg-offset* 14)
 (defun md-expand-push-arg (arg argsp) (let* ((htype (expr-htype arg)) (expr (make-expr 'set htype (list (make-expr 'auto 'i4 (+ argsp *mdl-stack-arg-offset*)) arg)))) (cond ((and (fixnum-p htype) (md-expand-setn (car (expr-args expr)) (car (expr-args (cadr (expr-args expr)))) htype))) (t (emit-ccode 'expr expr)))))
 (defun md-expand-pop-args (nbyte))
 
@@ -83,28 +83,38 @@ types:
 #| define registers |#
 (loadmsg "0")
 
-(defreg a.b i1 (conflict a.w a.i) (param 0))
-(defreg x.b i1 (conflict x.w x.i) (param 1))
-(defreg y.b i1 (conflict y.w y.i) (param 2))
-(defreg a.w i2 (conflict a.b a.i) (param 0))
-(defreg x.w i2 (conflict x.b x.i) (param 1))
-(defreg y.w i2 (conflict y.b y.i) (param 2))
-(defreg a.i i4 (conflict a.b a.w) (param 0))
-(defreg x.i i4 (conflict x.b x.w) (param 1))
-(defreg y.i i4 (conflict y.b y.w) (param 2))
+(defreg a.b i1 (conflict a.w) (param 0))
+(defreg x.b i1 (conflict x.w) (param 1))
+(defreg y.b i1 (conflict y.w) (param 2))
+(defreg $2.b i1 (conflict $2.w))
+(defreg $4.b i1 (conflict $4.w))
+(defreg $6.b i1 (conflict $6.w))
+(defreg $8.b i1 (conflict $8.w))
+(defreg $a.b i1 (conflict $a.w))
+(defreg $c.b i1 (conflict $c.w))
+(defreg a.w i2 (conflict a.b) (param 0))
+(defreg x.w i2 (conflict x.b) (param 1))
+(defreg y.w i2 (conflict y.b) (param 2))
+(defreg $2.w i2 (conflict $2.b))
+(defreg $4.w i2 (conflict $4.b))
+(defreg $6.w i2 (conflict $6.b))
+(defreg $8.w i2 (conflict $8.b))
+(defreg $a.w i2 (conflict $a.b))
+(defreg $c.w i2 (conflict $c.b))
 
 #| CSP = constraint satisfaction problem |#
-(defcsp B-regs nil (x.b y.b a.b))
-(defcsp H-regs nil (x.w y.w a.w))
-(defcsp W-regs nil (x.w y.w a.w))
+(defcsp B-regs nil (a.b x.b y.b))
+(defcsp W-regs nil (a.w x.w y.w))
 (defcsp A-regs nil (a.w))
-(defcsp idx-regs nil (x.w y.w))
-(defcsp W-regs-for-call-general nil (a.w))
-(setq *md-callee-save-regs* '())
+(defcsp M8-regs nil ($2.b $4.b $6.b $8.b $a.b $c.b))
+(defcsp M16-regs nil ($2.w $4.w $6.w $8.w $a.w $c.w))
+(defcsp W-regs-for-call-general nil ())
+(setq *md-callee-save-regs* nil)
 #| (setq *md-callee-save-regs* '(r20B r21B r22B r23B r24B r25B r20H r21H r22H r23H r24H r25H r20W r21W r22W r23W r24W r25W r20F r21F r22F r23F r24F r25F)) |#
-(setq *md-caller-save-regs* '(x.w y.w))
-(defcsp caller-save-regs nil (x.w y.w))
-(dolist (regs '(B-regs H-regs W-regs)) (let ((W-regs (cdr (get 'W-regs 'defcsp)))) (dolist (r (cdr (get regs 'defcsp))) (put r 'W-reg (pop W-regs)))))
+(setq *md-caller-save-regs* '(a.w x.w y.w))
+(defcsp caller-save-regs nil (a.w x.w y.w))
+(dolist (regs '(B-regs W-regs)) (let ((W-regs (cdr (get 'W-regs 'defcsp)))) (dolist (r (cdr (get regs 'defcsp))) (put r 'W-reg (pop W-regs)))))
+(dolist (regs '(M8-regs M16-regs)) (let ((M16-regs (cdr (get 'M16-regs 'defcsp)))) (dolist (r (cdr (get regs 'defcsp))) (put r 'M-reg (pop M16-regs)))))
 
 (loadmsg "1")
 #| addressing mode? |#
@@ -113,10 +123,12 @@ types:
 (defcsp am-gpoffset (g) (const i2 (= g * gpoffset-p)))
 (defun gpoffset-p (x) (cond ((fixnum-p x) (and *gp-offset* (<= (- *gp-offset* 32767) x) (<= x (+ *gp-offset* 32767)))) ((consp x) (gpoffset-p (cadr x))) ((sent-p x) (if (eq (sent-scc x) 'extern) nil (memq (sent-segment x) '("bss")))) (t nil)))
 (defun not-gpoffset-p (x) (not (gpoffset-p x)))
+(defun one-p (x) (eq x 1))
 (defcsp am-dx (d x) (add i2 (= x) (const i2 (= d))))
 (defcsp co-fixnum (n) (const * (= n * fixnum-p)))
 (defcsp co-fixnum-2^n-p (n) (const * (= n * 2^n-p)))
 (defcsp co-zero (htype) (const htype (= z * zerop)))
+(defcsp co-one (htype) (const htype (= c * one-p)))
 (defun expr-not-reg-p (expr) (not (eq (expr-car expr) 'reg)))
 
 (loadmsg "2")
@@ -124,10 +136,38 @@ types:
 (defcode getreg (get i2 (= x (reg))) (reg r))
 (defcode setreg (set i1 (= x (reg)) (= y)) (reg nil y))
 (defcode setreg (set i2 (= x (reg)) (= y)) (reg nil y))
-(defcode load (set i1 (= x (hreg) B-regs) (get i1 am-sp)) (gen nil (ld.b (sp 'a) 'x)))
-(defcode load (set i2 (= x (hreg) H-regs) (get i2 am-sp)) (gen nil (ld.w (sp 'a) 'x)))
-(defcode store (set i1 am-sp (get i1 (= x (hreg) B-regs))) (gen nil (sta.b 'x (sp 'a))))
-(defcode store (set i2 am-sp (get i2 (= x (hreg) H-regs))) (gen nil (sta.w 'x (sp 'a))))
+(defcode load (set i1 (= x (hreg) B-regs) (get i1 am-sp))
+    (gen nil
+        (progn
+            (cond
+                ((areg-p x) (emit-mcode (list 'lda (list 'sp a))))
+                ((xreg-p x) (emit-mcode (list 'ldx (list 'sp a))))
+                ((yreg-p x) (emit-mcode (list 'ldy (list 'sp a))))
+                (t (emit-mcode (list 'load (list 'sp a)))) ))))
+(defcode load (set i2 (= x (hreg) W-regs) (get i2 am-sp))
+    (gen nil
+        (progn
+            (cond
+                ((areg-p x) (emit-mcode (list 'lda (list 'sp a))))
+                ((xreg-p x) (emit-mcode (list 'ldx (list 'sp a))))
+                ((yreg-p x) (emit-mcode (list 'ldy (list 'sp a))))
+                (t (emit-mcode (list 'load (list 'sp a)))) ))))
+(defcode store (set i1 am-sp (get i1 (= x (hreg) B-regs)))
+    (gen nil
+        (progn
+            (cond
+                ((areg-p x) (emit-mcode (list 'sta (list 'sp a))))
+                ((xreg-p x) (emit-mcode (list 'stx (list 'sp a))))
+                ((yreg-p x) (emit-mcode (list 'sty (list 'sp a))))
+                (t (emit-mcode (list 'store (list 'sp a)))) ))))
+(defcode store (set i2 am-sp (get i2 (= x (hreg) W-regs)))
+    (gen nil
+        (progn
+            (cond
+                ((areg-p x) (emit-mcode (list 'sta (list 'sp a))))
+                ((xreg-p x) (emit-mcode (list 'stx (list 'sp a))))
+                ((yreg-p x) (emit-mcode (list 'sty (list 'sp a))))
+                (t (emit-mcode (list 'store (list 'sp a)))) ))))
 
 (defcode move (set i1 (= x (hreg) B-regs) (get i1 (= y (hreg) B-regs)))
     (gen nil
@@ -139,9 +179,22 @@ types:
                 ((and (yreg-p x) (areg-p y)) (emit-mcode 'tay))
                 ((and (areg-p x) (xreg-p y)) (emit-mcode 'txa))
                 ((and (areg-p x) (yreg-p y)) (emit-mcode 'tya))
-                (t (emit-mcode (list 'move-i1 (list 'i1 'x) (list 'i1 'y)))))))
-        )
-(defcode move (set i2 (= x (hreg) H-regs) (get i2 (= y (hreg) H-regs)))
+                (t (emit-mcode (list 'move-i1 (list 'i1 x) (list 'i1 y)))) ))))
+(defcode move (set i1 (= x (hreg) B-regs) (get i1 (= y (hreg) M8-regs)))
+    (gen nil
+        (progn
+            (cond
+                ((areg-p x) (emit-mcode (list 'lda y)))
+                ((xreg-p x) (emit-mcode (list 'ldx y)))
+                ((yreg-p x) (emit-mcode (list 'ldy y))) ))))
+(defcode move (set i1 (= x (hreg) M8-regs) (get i1 (= y (hreg) B-regs)))
+    (gen nil
+        (progn
+            (cond
+                ((areg-p y) (emit-mcode (list 'sta x)))
+                ((xreg-p y) (emit-mcode (list 'stx x)))
+                ((yreg-p y) (emit-mcode (list 'sty x))) ))))
+(defcode move (set i2 (= x (hreg) W-regs) (get i2 (= y (hreg) W-regs)))
     (gen nil
         (progn
             (cond
@@ -151,50 +204,64 @@ types:
                 ((and (yreg-p x) (areg-p y)) (emit-mcode 'tay))
                 ((and (areg-p x) (xreg-p y)) (emit-mcode 'txa))
                 ((and (areg-p x) (yreg-p y)) (emit-mcode 'tya))
-                (t (emit-mcode (list 'move-i2 (list 'i2 'x) (list 'i2 'y)))))))
-        )
+                (t (emit-mcode (list 'move-i2 (list 'i2 x) (list 'i2 y)))) ))))
+(defcode move (set i2 (= x (hreg) W-regs) (get i2 (= y (hreg) M16-regs)))
+    (gen nil
+        (progn
+            (cond
+                ((areg-p x) (emit-mcode (list 'lda y)))
+                ((xreg-p x) (emit-mcode (list 'ldx y)))
+                ((yreg-p x) (emit-mcode (list 'ldy y))) ))))
+(defcode move (set i2 (= x (hreg) M16-regs) (get i2 (= y (hreg) W-regs)))
+    (gen nil
+        (progn
+            (cond
+                ((areg-p y) (emit-mcode (list 'sta x)))
+                ((xreg-p y) (emit-mcode (list 'stx x)))
+                ((yreg-p y) (emit-mcode (list 'sty x))) ))))
 (defcode push (set i1 (tos) (get i1 (= x (hreg) B-regs))) (gen nil (*push-i1 'x)))
-(defcode push (set i2 (tos) (get i2 (= x (hreg) H-regs))) (gen nil (*push-i2 'x)))
+(defcode push (set i2 (tos) (get i2 (= x (hreg) W-regs))) (gen nil (*push-i2 'x)))
 (defcode pop (set i1 (= x (hreg) B-regs) (get i1 (tos))) (gen nil (*pop-i1 'x)))
-(defcode pop (set i2 (= x (hreg) H-regs) (get i2 (tos))) (gen nil (*pop-i2 'x)))
+(defcode pop (set i2 (= x (hreg) W-regs) (get i2 (tos))) (gen nil (*pop-i2 'x)))
 
 (loadmsg "3")
-(defcode geti1-general (get i1 (= p (* i2))) (reg r p) (gen ((r . B-regs) (p . W-regs)) (ld.b (dx 0 'p) 'r)))
-(defcode geti1-dx (get i1 am-dx) (reg r x) (gen ((r . B-regs) (x . W-regs)) (ld.b (dx 'd 'x) 'r)))
-(defcode geti1-const (get i1 am-const) (reg r) (gen ((r . B-regs)) (ld.b (dx 'c r0W) 'r)))
-(defcode geti1-gp (get i1 am-gpoffset) (reg r) (gen ((r . B-regs)) (ld.b (gp 'g) 'r)))
+(defcode geti1-general (get i1 (= p (* i2))) (reg r p) (gen ((r . B-regs) (p . W-regs)) (ld (dx 0 'p) 'r)))
+(defcode geti1-dx (get i1 am-dx) (reg r x) (gen ((r . B-regs) (x . W-regs)) (ld (dx 'd 'x) 'r)))
+(defcode geti1-const (get i1 am-const) (reg r) (gen ((r . B-regs)) (ld (dx 'c r0W) 'r)))
+(defcode geti1-gp (get i1 am-gpoffset) (reg r) (gen ((r . B-regs)) (ld (gp 'g) 'r)))
 (defcode geti1-sp (get i1 am-sp)
     (reg r)
     (gen ((r . B-regs))
         (progn
             (cond
-                ((areg-p r) (emit-mcode (list 'lda.b (list 'sp a))))
-                ((xreg-p r) (emit-mcode (list 'ldx.b (list 'sp a))))
-                ((yreg-p r) (emit-mcode (list 'ldy.b (list 'sp a))))
+                ((areg-p r) (emit-mcode (list 'lda (list 'sp a))))
+                ((xreg-p r) (emit-mcode (list 'ldx (list 'sp a))))
+                ((yreg-p r) (emit-mcode (list 'ldy (list 'sp a))))
                 (t (emit-mcode (list 'geti1-sp (list 'sp a)))) ))))
 
-(defcode geti2-general (get i2 (= p (* i2))) (reg r p) (gen ((r . H-regs) (p . W-regs)) (ld.w (dx 0 'p) 'r)))
+(defcode geti2-general (get i2 (= p (* i2))) (reg r p) (gen ((r . W-regs) (p . W-regs)) (geti2-general (dx 0 'p) 'r)))
 (defcode geti2-dx (get i2 am-dx)
     (reg r x)
     (gen ((r . A-regs) (x . W-regs))
-    (progn (emit-mcode (list 'lda.w (list 'mem8 d) r))) ))
+    (lda (i1 'd) 'x)))
+
 (defcode geti2-const (get i2 am-const)
     (reg r)
-    (gen ((r . H-regs))
+    (gen ((r . W-regs))
         (progn
             (cond
-                ((areg-p r) (emit-mcode (list 'lda.w (list 'mem16 c))))
-                ((xreg-p r) (emit-mcode (list 'ldx.w (list 'mem16 c))))
-                ((yreg-p r) (emit-mcode (list 'ldy.w (list 'mem16 c)))) ))))
-(defcode geti2-gp (get i2 am-gpoffset) (reg r) (gen ((r . H-regs)) (ld.w (gp 'g) 'r)))
+                ((areg-p r) (emit-mcode (list 'lda (list 'mem16 c))))
+                ((xreg-p r) (emit-mcode (list 'ldx (list 'mem16 c))))
+                ((yreg-p r) (emit-mcode (list 'ldy (list 'mem16 c)))) ))))
+(defcode geti2-gp (get i2 am-gpoffset) (reg r) (gen ((r . W-regs)) (ld (gp 'g) 'r)))
 (defcode geti2-sp (get i2 am-sp)
     (reg r)
-    (gen ((r . H-regs))
+    (gen ((r . W-regs))
         (progn
             (cond
-                ((areg-p r) (emit-mcode (list 'lda.w (list 'sp a))))
-                ((xreg-p r) (emit-mcode (list 'ldx.w (list 'sp a))))
-                ((yreg-p r) (emit-mcode (list 'ldy.w (list 'sp a))))
+                ((areg-p r) (emit-mcode (list 'lda (list 'sp a))))
+                ((xreg-p r) (emit-mcode (list 'ldx (list 'sp a))))
+                ((yreg-p r) (emit-mcode (list 'ldy (list 'sp a))))
                 (t (emit-mcode (list 'geti2-sp (list 'sp a)))) ))))
 
 (loadmsg "4")
@@ -213,130 +280,174 @@ types:
 (defcode seti1-general
     (set i1 (= p (* i2)) (= r))
     (reg nil p r)
-    (gen ((p . W-regs) (r . B-regs)) (sta.b 'r (dx 0 'p))))
+    (gen ((p . W-regs) (r . B-regs)) (sta 'r (dx 0 'p))))
 
 (defcode seti1-general-zero
     (set i1 (= p (* i2)) (co-zero i1))
     (reg nil p)
-    (gen ((p . W-regs)) (sta.b r0B (dx 0 'p))))
+    (gen ((p . W-regs)) (sta r0B (dx 0 'p))))
 
 (defcode seti1-dx
     (set i1 am-dx (= r))
     (reg nil x r)
-    (gen ((x . W-regs) (r . B-regs)) (sta.b 'r (dx 'd 'x))))
+    (gen ((x . W-regs) (r . B-regs)) (sta 'r (dx 'd 'x))))
 
 (defcode seti1-dx-zero
     (set i1 am-dx (co-zero i1))
     (reg nil x)
-    (gen ((x . W-regs)) (sta.b r0B (dx 'd 'x))))
+    (gen ((x . W-regs)) (sta r0B (dx 'd 'x))))
 
 (defcode seti1-const
     (set i1 am-const (= r))
     (reg nil r)
-    (gen ((r . B-regs)) (sta.b 'r (dx 'c r0W))))
+    (gen ((r . B-regs)) (sta 'r (dx 'c r0W))))
 
 (defcode seti1-gp
     (set i1 am-gpoffset (= r))
     (reg nil r)
-    (gen ((r . B-regs)) (sta.b 'r (gp 'g))))
+    (gen ((r . B-regs)) (sta 'r (gp 'g))))
 
 (defcode seti1-gp-zero
     (set i1 am-gpoffset (co-zero i1))
     (reg)
-    (gen nil (sta.b r0B (gp 'g))))
+    (gen nil (sta r0B (gp 'g))))
 
 (defcode seti1-sp (set i1 am-sp (= r))
     (reg nil r)
     (gen ((r . B-regs))
         (progn
             (cond
-                ((areg-p r) (emit-mcode (list 'sta.b (list 'sp a))))
-                ((xreg-p r) (emit-mcode (list 'stx.b (list 'sp a))))
-                ((yreg-p r) (emit-mcode (list 'sty.b (list 'sp a))))
+                ((areg-p r) (emit-mcode (list 'sta (list 'sp a))))
+                ((xreg-p r) (emit-mcode (list 'stx (list 'sp a))))
+                ((yreg-p r) (emit-mcode (list 'sty (list 'sp a))))
                 (t (emit-mcode (list 'seti1-sp (list 'sp a)))) ))))
 
 (defcode seti1-sp-zero
     (set i1 am-sp (co-zero i1))
     (reg)
-    (gen nil (sta.b r0B (sp 'a))))
+    (gen nil (sta r0B (sp 'a))))
 
 (defcode seti2-general
     (set i2 (= p (* i2)) (= r))
     (reg nil p r)
-    (gen ((p . W-regs) (r . H-regs)) (sta.w 'r (dx 0 'p))))
+    (gen ((p . W-regs) (r . W-regs)) (seti2-general 'r (dx 0 'p))))
 
-(defcode seti2-general-convit (set i2 (= p (* i2)) (convit i2 (= r))) (reg nil p r) (gen ((p . W-regs) (r . W-regs)) (sta.w 'r (dx 0 'p))))
-(defcode seti2-general-zero (set i2 (= p (* i2)) (co-zero i2)) (reg nil p) (gen ((p . W-regs)) (sta.w r0W (dx 0 'p))))
-(defcode seti2-dx (set i2 am-dx (= r)) (reg nil x r) (gen ((x . W-regs) (r . H-regs)) (sta.w 'r (dx 'd 'x))))
-(defcode seti2-dx-convit (set i2 am-dx (convit i2 (= r))) (reg nil x r) (gen ((x . W-regs) (r . W-regs)) (sta.w 'r (dx 'd 'x))))
-(defcode seti2-dx-zero (set i2 am-dx (co-zero i2)) (reg nil x) (gen ((x . W-regs)) (sta.w r0W (dx 'd 'x))))
+(defcode seti2-general-convit (set i2 (= p (* i2)) (convit i2 (= r))) (reg nil p r) (gen ((p . W-regs) (r . W-regs)) (sta 'r (dx 0 'p))))
+(defcode seti2-general-zero (set i2 (= p (* i2)) (co-zero i2)) (reg nil p) (gen ((p . W-regs)) (stz 'p)))
+(defcode seti2-dx (set i2 am-dx (= r))
+    (reg nil x r)
+    (gen ((x . W-regs) (r . A-regs))
+        (sta (mem16 'd) 'x)))
+(defcode seti2-dx-convit (set i2 am-dx (convit i2 (= r))) (reg nil x r) (gen ((x . W-regs) (r . W-regs)) (sta 'r (dx 'd 'x))))
+(defcode seti2-zero (set i2 (co-zero i2)) (reg nil x) (gen ((x . W-regs)) (stz 'x)))
 (defcode seti2-const (set i2 am-const (= r))
     (reg nil r)
-    (gen ((r . H-regs))
+    (gen ((r . W-regs))
         (progn
             (cond
-                ((areg-p r) (emit-mcode (list 'sta.w (list 'mem16 c))))
-                ((xreg-p r) (emit-mcode (list 'stx.w (list 'mem16 c))))
-                ((yreg-p r) (emit-mcode (list 'sty.w (list 'mem16 c)))) ))))
-(defcode seti2-const-convit (set i2 am-const (convit i2 (= r))) (reg nil r) (gen ((r . W-regs)) (sta.w 'r (dx 'c r0W))))
-(defcode seti2-gp (set i2 am-gpoffset (= r)) (reg nil r) (gen ((r . H-regs)) (sta.w 'r (gp 'g))))
-(defcode seti2-gp-convit (set i2 am-gpoffset (convit i2 (= r))) (reg nil r) (gen ((r . W-regs)) (sta.w 'r (gp 'g))))
-(defcode seti2-gp (set i2 am-gpoffset (co-zero i2)) (reg) (gen nil (sta.w r0W (gp 'g))))
+                ((areg-p r) (emit-mcode (list 'sta (list 'mem16 c))))
+                ((xreg-p r) (emit-mcode (list 'stx (list 'mem16 c))))
+                ((yreg-p r) (emit-mcode (list 'sty (list 'mem16 c))))
+                (t (emit-mcode (list 'seti2-const (list 'mem16 c)))) ))))
+(defcode seti2-const-zero (set i2 am-const (= r (co-zero i2)))
+    (reg nil)
+    (gen nil
+    (stz.w (mem16 'c))))
+
+(defcode seti2-const-convit (set i2 am-const (convit i2 (= r))) (reg nil r) (gen ((r . W-regs)) (sta 'r (dx 'c r0W))))
+(defcode seti2-gp (set i2 am-gpoffset (= r)) (reg nil r) (gen ((r . W-regs)) (sta 'r (gp 'g))))
+(defcode seti2-gp-convit (set i2 am-gpoffset (convit i2 (= r))) (reg nil r) (gen ((r . W-regs)) (sta 'r (gp 'g))))
+(defcode seti2-gp (set i2 am-gpoffset (co-zero i2)) (reg) (gen nil (sta r0W (gp 'g))))
 (defcode seti2-sp (set i2 am-sp (= r))
     (reg nil r)
-    (gen ((r . H-regs))
+    (gen ((r . W-regs))
         (progn
             (cond
-                ((areg-p r) (emit-mcode (list 'sta.w (list 'sp a))))
-                ((xreg-p r) (emit-mcode (list 'stx.w (list 'sp a))))
-                ((yreg-p r) (emit-mcode (list 'sty.w (list 'sp a)))) ))))
-(defcode seti2-sp-zero (set i2 am-sp (co-zero i2)) (reg) (gen nil (sta.w r0W (sp 'a))))
+                ((areg-p r) (emit-mcode (list 'sta (list 'sp a))))
+                ((xreg-p r) (emit-mcode (list 'stx (list 'sp a))))
+                ((yreg-p r) (emit-mcode (list 'sty (list 'sp a)))) ))))
+(defcode seti2-sp-zero (set i2 am-sp (co-zero i2)) (reg) (gen nil (sta r0W (sp 'a))))
 
 (loadmsg "5")
 (defcode consti1-general (const i1 (= c)) (reg r)
     (gen ((r . B-regs))
         (progn
             (ecase r
-                ('a.b (emit-mcode (list 'lda.b (list 'i1 c))))
-                ('x.b (emit-mcode (list 'ldx.b (list 'i1 c))))
-                ('y.b (emit-mcode (list 'ldy.b (list 'i1 c))))
+                ('a.b (emit-mcode (list 'lda (list 'i1 c))))
+                ('x.b (emit-mcode (list 'ldx (list 'i1 c))))
+                ('y.b (emit-mcode (list 'ldy (list 'i1 c))))
                 (t (emit-mcode (list 'consti1-general (list 'i1 c)))) ))))
 (defcode consti2-general (const i2 (= c)) (reg r)
-    (gen ((r . H-regs))
+    (gen ((r . W-regs))
         (progn
             (ecase r
-                ('a.w (emit-mcode (list 'lda.w (list 'i2 c))))
-                ('x.w (emit-mcode (list 'ldx.w (list 'i2 c))))
-                ('y.w (emit-mcode (list 'ldy.w (list 'i2 c))))
+                ('a.w (emit-mcode (list 'lda (list 'i2 c))))
+                ('x.w (emit-mcode (list 'ldx (list 'i2 c))))
+                ('y.w (emit-mcode (list 'ldy (list 'i2 c))))
                 (t (emit-mcode (list 'consti2-general (list 'i2 c)))) ))))
 (loadmsg "6")
 (defcode auto-general (auto i2 (= a)) (reg r) (gen ((r . W-regs)) (movea (i2 'a) sp 'r)))
 
 #| type conversions |#
 (loadmsg "7")
-(defcode convsxi2/i1-general (convsx i2 (= s (* i1))) (reg r s) (gen ((r . H-regs) (s . B-regs) #| no op |#)))
-(defcode convzxi2/i1-general (convzx i2 (= s (* i1))) (reg r s) (gen ((r . H-regs) (s . B-regs)) (andi (i2 255) 's 'r)))
-(defcode conviti1/i2-general (convit i1 (= s (* i2))) (reg r s) (gen ((r . B-regs) (s . H-regs)) (mov 's 'r) (shl 24 'r) (sar 24 'r)))
+(defcode convsxi2/i1-general (convsx i2 (= s (* i1))) (reg r s) (gen ((r . W-regs) (s . B-regs)) (mov 's 'r)))
+(defcode convzxi2/i1-general (convzx i2 (= s (* i1))) (reg r s) (gen ((r . W-regs) (s . B-regs)) (andi (i2 255) 's 'r)))
+(defcode conviti1/i2-general (convit i1 (= s (* i2))) (reg r s) (gen ((r . B-regs) (s . W-regs)) (mov 's 'r) (shl 24 'r) (sar 24 'r)))
 
 (loadmsg "8")
-(defcode negi4-general (neg i2 (= r)) (reg r r) (gen ((r . W-regs)) (not 'r 'r) (add (i2 1) 'r)))
-(defcode negf4-general (neg f4 (= r)) (reg r r) (gen ((r . F-regs)) (mov r0F r30F) (subf.s 'r r30F) (mov r30F 'r)))
-(defcode addi4-general (add i2 (= r) (= p)) (reg r r p) (gen ((r . W-regs) (p . W-regs)) (add 'p 'r)))
-(defcode addi4-const (add i2 (= x) (const i2 (= c))) (reg r x) (gen ((r . W-regs) (x . W-regs)) (progn (if (eq r x) (emit-mcode (list 'add (list 'i2 c) r)) (emit-mcode (list 'addi (list 'i2 c) x r))))))
-(defcode addf4-general (add f4 (= r) (= p)) (reg r r p) (gen ((r . F-regs) (p . F-regs)) (addf.s 'p 'r)))
-(defcode subi4-general (sub i2 (= r) (= p)) (reg r r p) (gen ((r . W-regs) (p . W-regs)) (sub 'p 'r)))
-(defcode subi4-const (sub i2 (= x) (const i2 (= c))) (reg r x) (gen ((r . W-regs) (x . W-regs)) (progn (if (eq r x) (emit-mcode (list 'add (list 'i2 (list 'neg c)) r)) (emit-mcode (list 'addi (list 'i2 (list 'neg c)) x r))))))
-(defcode subf4-general (sub f4 (= r) (= p)) (reg r r p) (gen ((r . F-regs) (p . F-regs)) (subf.s 'p 'r)))
-(defcode bandi4-general (band i4 (= r) (= p)) (reg r r p) (gen ((r . W-regs) (p . W-regs)) (and 'p 'r)))
-(defcode bandi4-const (band i4 (= x) (const i4 (= c))) (reg r x) (gen ((r . W-regs) (x . W-regs)) (progn (if (eq r x) (emit-mcode (list 'and (list 'i4 c) r)) (emit-mcode (list 'andi (list 'i4 c) x r))))))
-(defcode bxori4-general (bxor i4 (= r) (= p)) (reg r r p) (gen ((r . W-regs) (p . W-regs)) (xor 'p 'r)))
-(defcode bxori4-const (bxor i4 (= x) (const i4 (= c))) (reg r x) (gen ((r . W-regs) (x . W-regs)) (progn (if (eq r x) (emit-mcode (list 'xor (list 'i4 c) r)) (emit-mcode (list 'xori (list 'i4 c) x r))))))
-(defcode bori4-general (bor i4 (= r) (= p)) (reg r r p) (gen ((r . W-regs) (p . W-regs)) (or 'p 'r)))
-(defcode bori4-const (bor i4 (= x) (const i4 (= c))) (reg r x) (gen ((r . W-regs) (x . W-regs)) (progn (if (eq r x) (emit-mcode (list 'or (list 'i4 c) r)) (emit-mcode (list 'ori (list 'i4 c) x r))))))
-(defcode bnoti4-general (bnot i4 (= r)) (reg r r) (gen ((r . W-regs)) (not 'r 'r)))
-(defcode muli4-general (mul i2 (= r) (= s)) (reg r r s) (gen ((r . W-regs) (s . W-regs)) (mul 's 'r)))
-(defcode muli4-const (mul i2 (= r) (co-fixnum n)) (reg r r) (gen ((r . W-regs)) (mul 'n 'r)))
-(defcode muli4-2^n (mul i2 (= r) (co-fixnum-2^n-p n))
+
+(defcode negi2-general (neg i2 (= r)) (reg r r) (gen ((r . W-regs)) (not 'r 'r) (add (i2 1) 'r)))
+(defcode addi2-general (add i2 (= r) (= p (reg)))
+    (reg r r p)
+    (gen ((r . A-regs) (p . M16-regs))
+    (adc 'p)))
+(defcode addi1-const (add i1 (= r) (const i1 (= c)))
+    (reg r r)
+    (gen ((r a.b))
+        (progn
+            (if (and (< c 5) (> c 0))
+                (dotimes (i c)
+                    (emit-mcode 'inc))
+                    (progn
+                        (emit-mcode (list 'clc))
+                        (emit-mcode (list 'adc (list 'i1 c))) )))))
+(defcode addi1-general (add i1 (= r) (= p (reg)))
+    (reg r r p)
+    (gen ((r a.b) (p . M8-regs))
+    (adc 'p)))
+(defcode addi2-const (add i2 (= r) (const i2 (= c)))
+    (reg r r)
+    (gen ((r a.w))
+        (progn
+            (if (and (< c 5) (> c 0))
+                (dotimes (i c)
+                    (emit-mcode 'inc))
+                    (progn
+                        (emit-mcode (list 'clc))
+                        (emit-mcode (list 'adc (list 'i1 c))) )))))
+(defcode subi2-general (sub i2 (= r) (= s))
+    (reg r r s)
+    (gen ((r . A-regs) (s . M16-regs))
+    (sec)
+    (sbc.w 's)))
+
+(defcode subi2-const (sub i2 (= r) (const i2 (= c)))
+    (reg r)
+    (gen ((r . A-regs))
+    (progn
+        (emit-mcode (list 'sec))
+        (emit-mcode (list 'sbc (list 'i2 c))) )))
+
+(defcode bandi2-general (band i2 (= r) (= p)) (reg r r p) (gen ((r . W-regs) (p . W-regs)) (and 'p 'r)))
+(defcode bandi2-const (band i2 (= x) (const i2 (= c))) (reg r x) (gen ((r . W-regs) (x . W-regs)) (progn (if (eq r x) (emit-mcode (list 'and (list 'i4 c) r)) (emit-mcode (list 'andi (list 'i4 c) x r))))))
+(defcode bxori2-general (bxor i2 (= r) (= p)) (reg r r p) (gen ((r . W-regs) (p . W-regs)) (xor 'p 'r)))
+(defcode bxori2-const (bxor i2 (= x) (const i2 (= c))) (reg r x) (gen ((r . W-regs) (x . W-regs)) (progn (if (eq r x) (emit-mcode (list 'xor (list 'i4 c) r)) (emit-mcode (list 'xori (list 'i4 c) x r))))))
+(defcode bori2-general (bor i2 (= r) (= p)) (reg r r p) (gen ((r . W-regs) (p . W-regs)) (or 'p 'r)))
+(defcode bori2-const (bor i2 (= x) (const i4 (= c))) (reg r x) (gen ((r . W-regs) (x . W-regs)) (progn (if (eq r x) (emit-mcode (list 'or (list 'i4 c) r)) (emit-mcode (list 'ori (list 'i4 c) x r))))))
+(defcode bnoti2-general (bnot i2 (= r)) (reg r r) (gen ((r . W-regs)) (not 'r 'r)))
+(defcode muli2-general (mul i2 (= r) (= s)) (reg r r s) (gen ((r . W-regs) (s . W-regs)) (mul 's 'r)))
+(defcode muli2-const (mul i2 (= r) (co-fixnum n)) (reg r r) (gen ((r . W-regs)) (mul 'n 'r)))
+(defcode muli2-2^n (mul i2 (= r) (co-fixnum-2^n-p n))
     (reg r r)
     (gen ((r . A-regs))
         (progn
@@ -381,29 +492,43 @@ types:
             "L1")
 |#
 
-(defcode jump2i4-general (jump2 ((jcode jmc) * (= r (* i2)) (= p (* i2))) la)
+(defcode jump2i2-general (jump2 ((jcode jmc) * (= r (* i2)) (= p (* i2))) la)
     (reg nil r p)
-    (gen ((r . A-regs) (p . W-regs))
-        (cmp 'p 'r)
-        ('jmc 'la)))
+    (gen ((r . A-regs) (p . M16-regs))
+        (progn
+            (cond
+                ((areg-p r) (emit-mcode (list 'cmp p)))
+                ((xreg-p r) (emit-mcode (list 'cpx p)))
+                ((yreg-p r) (emit-mcode (list 'cpy p)))
+                (t (emit-mcode (list 'jump2i2-mem p))))
+            (emit-mcode (list jmc la)) )))
 
-#| custom constraint |#
 (defcode jump2i2-mem (jump2 ((jcode jmc) * (= r (* i2)) (get i2 (const i2 (= p)))) la)
     (reg nil r)
-    (gen ((r . A-regs))
-            (cmp (mem16 'p))
-            ('jmc 'la)))
+    (gen ((r . W-regs))
+        (progn
+            (cond
+                ((areg-p r) (emit-mcode (list 'cmp (list 'mem16 p))))
+                ((xreg-p r) (emit-mcode (list 'cpx (list 'mem16 p))))
+                ((yreg-p r) (emit-mcode (list 'cpy (list 'mem16 p))))
+                (t (emit-mcode (list 'jump2i2-mem (list 'mem16 p)))))
+            (emit-mcode (list jmc la)) )))
 
-(defcode jump2i4-const (jump2 ((jcode jmc) * (= r (* i2)) (co-fixnum c)) la)
+(defcode jump2i2-const (jump2 ((jcode jmc) * (= r (* i2)) (co-fixnum c)) la)
     (reg nil r)
     (gen ((r . W-regs))
-        (cmp (i2 'c) 'r)
-        ('jmc 'la)))
+        (progn
+            (cond
+                ((areg-p r) (emit-mcode (list 'cmp (list 'i2 c))))
+                ((xreg-p r) (emit-mcode (list 'cpx (list 'i2 c))))
+                ((yreg-p r) (emit-mcode (list 'cpy (list 'i2 c))))
+                (t (emit-mcode (list 'jump2i2-const (list 'i2 c)))))
+            (emit-mcode (list jmc la)) )))
 
 #|
 (defcode convsxi2/i1-general (convsx i2 (= s (* i1)))
     (reg r s)
-    (gen ((r . H-regs) (s . B-regs)
+    (gen ((r . W-regs) (s . B-regs)
         #| no op |#)))
 |#
 
@@ -439,19 +564,23 @@ types:
     (gen nil
     (progn
         #| calculate stack etc |#
-        (let ((frame (if *cfun-is-leaf-p* 0 *mdl-stack-arg-offset*)))
-            (setq *mdl-arg* frame)
+        (setq *mdl-arg* 0)
+        (let ((frame 0))
             (incf frame *cfun-args-size*)
             (dolist (s *cfun-local-list*) (incf (sent-offset s) frame))
             (incf frame *cfun-local-size*)
+            (dolist (r *cfun-hreg-list*)
+                (let (res)
+                    (if (get r 'M-reg)
+                        (setq *mdl-arg* *mdl-stack-arg-offset*))
+                    (setq r (get r 'W-reg))
+                    (unless (memq r res) (push r res))
+                    (setq *cfun-hreg-list* res)))
+            (incf frame *mdl-arg*)
             (dolist (s *cfun-tmp-list*) (incf (sent-offset s) frame))
             (incf frame *cfun-tmp-size*)
-            (let (res)
-                (dolist (r *cfun-hreg-list*) (setq r (get r 'W-reg))
-                    (unless (memq r res) (push r res)))
-                (setq *cfun-hreg-list* res))
             #| hardware registers used by the function |#
-            (setq *cfun-hreg-list* (delq 'a.i *cfun-hreg-list*))
+            (setq *cfun-hreg-list* (delq 'nil *cfun-hreg-list*))
             (dolist (reg *md-caller-save-regs*) (setq *cfun-hreg-list* (delq reg *cfun-hreg-list*)))
             (setq *mdl-hreg-save-area* frame *mdl-hreg-save-area-size* (* 4 (length *cfun-hreg-list*)))
             (incf frame *mdl-hreg-save-area-size*)
@@ -479,7 +608,7 @@ types:
                 )
             #| (unless (zerop *mdl-frame-size*) (emit-mcode (list 'add (list 'i4 (- *mdl-frame-size*)) 'sp))) |#
             #| (unless *cfun-is-leaf-p* (emit-mcode (list 'st.w 'lp (list 'sp (list 'sub *mdl-frame-size* 4))))) |#
-            #| (unless (zerop *mdl-hreg-save-area-size*) (let ((off *mdl-hreg-save-area*)) (dolist (reg *cfun-hreg-list*) (emit-mcode (list 'st.w reg (list 'sp (posincf off 4))))))) |#
+            (unless (zerop *mdl-hreg-save-area-size*) (let ((off *mdl-hreg-save-area*)) (dolist (reg *cfun-hreg-list*) (emit-mcode (list 'st.w reg (list 'sp (posincf off 4)))))))
             )))
 
 (defcode epilogue (epilogue)
@@ -491,15 +620,15 @@ types:
         (unless (zerop *mdl-frame-size*) (emit-mcode 'pld)))
     (rtl)))
 
-(defcode pusharg (set i1 (arg) (= x)) (reg nil x) (gen ((x . B-regs)) (progn (emit-mcode (list 'sta.b x (list 'sp *mdl-arg*))) (setq *mdl-arg* (+ *mdl-arg* 2)))))
-(defcode pusharg (set i2 (arg) (= x)) (reg nil x) (gen ((x . H-regs)) (progn (emit-mcode (list 'sta.w x (list 'sp *mdl-arg*))) (setq *mdl-arg* (+ *mdl-arg* 2)))))
+(defcode pusharg (set i1 (arg) (= x)) (reg nil x) (gen ((x . B-regs)) (progn (emit-mcode (list 'sta x (list 'sp *mdl-arg*))) (setq *mdl-arg* (+ *mdl-arg* 2)))))
+(defcode pusharg (set i2 (arg) (= x)) (reg nil x) (gen ((x . W-regs)) (progn (emit-mcode (list 'sta x (list 'sp *mdl-arg*))) (setq *mdl-arg* (+ *mdl-arg* 2)))))
 (defcode poparg (set (= n) (null) (get * (arg))) (gen nil (progn (setq *mdl-arg* (- *mdl-arg* n)))))
 (defcode calli1-general (call i1 (= f)) (reg r f) (gen ((r a.b) (f . W-regs-for-call-general) (use . caller-save-regs)) (mov (i4 (add * 10)) lp) (jmp (dx 0 'f))))
 (defcode calli2-general (call i2 (= f)) (reg r f) (gen ((r a.w) (f . W-regs-for-call-general) (use . caller-save-regs)) (mov (i4 (add * 10)) lp) (jmp (dx 0 'f))))
-(defcode callvoid-general (call void (= f)) (reg r f) (gen ((r a.i) (f . W-regs-for-call-general) (use . caller-save-regs)) (mov (i4 (add * 10)) lp) (jmp (dx 0 'f))))
-(defcode calli1-const (call i1 (const i2 (= f))) (reg r) (gen ((r a.b) (use . caller-save-regs)) (jsl.l (mem16 'f))))
-(defcode calli2-const (call i2 (const i2 (= f))) (reg r) (gen ((r a.w) (use . caller-save-regs)) (jsl.l (mem16'f))))
-(defcode callvoid-const (call void (const i2 (= f))) (reg r) (gen ((r a.i) (use . caller-save-regs)) (jsl.l (mem16 'f))))
+(defcode callvoid-general (call void (= f)) (reg r f) (gen ((r a.w) (f . W-regs-for-call-general) (use . caller-save-regs)) (mov (i4 (add * 10)) lp) (jmp (dx 0 'f))))
+(defcode calli1-const (call i1 (const i2 (= f))) (reg r) (gen ((r a.b) (use . caller-save-regs)) (jsl (label 'f))))
+(defcode calli2-const (call i2 (const i2 (= f))) (reg r) (gen ((r a.w) (use . caller-save-regs)) (jsl (label 'f))))
+(defcode callvoid-const (call void (const i2 (= f))) (reg r) (gen ((r a.w) (use . caller-save-regs)) (jsl (label 'f))))
 (defcode ret-i1 (set i1 (ret) (= r)) (reg nil r) (gen ((r a.b))))
 (defcode ret-i2 (set i2 (ret) (= r)) (reg nil r) (gen ((r a.w))))
 
@@ -540,16 +669,16 @@ types:
     (if *debug* (emit-acode "%t%T\n" code label)
     (emit-acode
         (ecase code
-            (jmp-1 "jr%T\n")
-            (jmp-eq "be%T\n")
+            (jmp-1 "bra%T\n")
+            (jmp-eq "beq%T\n")
             (jmp-ne "bne%T\n")
-            (jmp-lt "blt%T\n")
+            (jmp-lt "bcc%T\n")
             (jmp-ltu "bl%T\n")
             (jmp-le "ble%T\n")
             (jmp-leu "bnh%T\n")
             (jmp-gt "bgt%T\n")
             (jmp-gtu "bh%T\n")
-            (jmp-ge "bge%T\n")
+            (jmp-ge "bcs%T\n")
             (jmp-geu "bnl%T\n"))
         label)))
 (defun emit-acode-debug-info-code (info) (ecase (car info) (file (emit-acode "dbsrc%s\n" (cadr info))) (line (emit-acode "dbline%d\n" (cadr info))) (begin (emit-acode "B@%d:\n" (cadr info))) (end (emit-acode "E@%d:\n" (cadr info)))))
@@ -563,9 +692,10 @@ types:
             (setq first nil)
             (cond
                 ((symbol-p a) (emit-acode "%s" (emit-acode-mcode-regname a)))
-                ((fixnum-p a) (emit-acode "#$%d" a))
-                (t #| assume it is a register |#
+                ((fixnum-p a) (emit-acode "$%T" a))
+                (t
                     (ecase (car a)
+                        ((label) (emit-acode "%s" (conv-asmconst-to-infix (cadr a))))
                         ((i1 i2 i4 f4) (emit-acode "#$%s" (conv-asmconst-to-infix (cadr a))))
                         ((mem8 mem16) (emit-acode "$%s" (emit-acode-mcode-offset (cadr a))))
                         ((sp gp) (emit-acode "$%s" (emit-acode-mcode-offset (cadr a))))
@@ -574,8 +704,25 @@ types:
 (defun emit-acode-mcode-offset (o) (if (zerop o) "" (conv-asmconst-to-infix o)))
 (defun emit-acode-mcode-regname (regsym)
     (let ((regname (symbol-name regsym)))
-        #| (when (and (not *debug*) (not (memq regsym '(sp gp lp tp))))
-            (setq regname (substring regname 0 -1))) |# regname))
+        (when (and (not *debug*) (not (memq regsym '(sp gp lp tp))))
+            (setq regname (substring regname 0 -2))) regname))
 (defun emit-acode-comment (msg) (emit-acode ";; %T\n" msg))
-(defun conv-asmconst-to-infix (expr) (cond ((sent-p expr) (if (eq (sent-sc expr) 'static) (sent-asmname expr) (if *debug* (sent-name expr) (format nil "%d" (sent-offset expr))))) ((eq expr '*) "*") ((symbol-p expr) (symbol-name expr)) ((fixnum-p expr) (format nil "%T" expr)) ((flonum-p expr) (format nil "0f%T" expr)) ((string-p expr) expr) ((atom expr) (clerror "conv-asmconst-to-infix: %t is illegal argument ????" expr)) (t (let* ((code (car expr)) (args (cdr expr)) (cargs (mapcar #'conv-asmconst-to-infix args))) (ecase code ((add adda) (apply #'format nil "%T+%T" cargs)) ((sub suba) (apply #'format nil (if (consp (cadr args)) "%T-(%T)" "%T-%T") cargs)) (neg (apply #'format nil (if (consp (car args)) "-(%T)" "-%T") cargs)))))))
+(defun conv-asmconst-to-infix (expr)
+    (cond
+        ((sent-p expr)
+            (if (eq (sent-sc expr) 'static)
+                (sent-asmname expr)
+                (if *debug* (sent-name expr) (format nil "%x" (sent-offset expr)))))
+        ((eq expr '*) "*")
+        ((symbol-p expr) (symbol-name expr))
+        ((fixnum-p expr) (format nil "%T" expr))
+        ((flonum-p expr) (format nil "0f%T" expr))
+        ((string-p expr) expr)
+        ((atom expr) (clerror "conv-asmconst-to-infix: %t is illegal argument ????" expr))
+        (t
+            (let* ((code (car expr)) (args (cdr expr)) (cargs (mapcar #'conv-asmconst-to-infix args)))
+                (ecase code
+                    ((add adda) (apply #'format nil "%T+%T" cargs))
+                    ((sub suba) (apply #'format nil (if (consp (cadr args)) "%T-(%T)" "%T-%T") cargs))
+                    (neg (apply #'format nil (if (consp (car args)) "-(%T)" "-%T") cargs)))))))
 (loadmsg "...")
