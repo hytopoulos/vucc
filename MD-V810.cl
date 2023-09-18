@@ -1,45 +1,52 @@
 (setq *md-name* "md-v810")
 (setq *md-version* "0.1")
 
-#| 65816 CALLING CONVENTION
-    First argument is passed in A, second in X, third in Y
-
-    Temporaries are stored at $0E
-    ; The rest of the variables are stored on the stack, starting at $0E
+#| 65816 CALLING CONVENTION and REGALLOC
+;;    * First argument is passed in A, second in X, third in Y
+;;    * The rest of the arguments are passed on zero-page stack (where?)
+;;    * $02-$0D are general purpose registers, mainly used for direct access instructions
+;;       * These registers are directly allocated to store new values if A,X,Y are full
+;;    * Functions which use the zero page push the DP register and allocate a stack frame by subtracting from it
+;;    * $0E and beyond are used to store temporary values
 |#
 
 #|
-
-functions:
-
-    (defreg name htype conflict-list &optional argument-number)
-        define a hardware register and its argument number for the calling convention
-
-    (defcode name pattern registers code)
-        match pattern in RTL and emit code for it
-
-        patterns:
-            (= name expr)
-                match expr and assign it to name
-
-    (gen hreg-list code)
-        generate code for RTL, reg-list is a list of (reg . reg-type) hard register pairs
-        code is not an expression to be evaluated, but a list of "mcode"
-
-    (reg . registers...)
-        define a hardware register that will be used in the instruction
-
-types:
-    bblockh: a list of mcode
-
-    mcode: machine code
-        example -- '3:00000000:rep 31'
-
-        use (mcode-code mcode) to get the instruction
-        use (mcode-args mcode) to get the arguments
-
+;; 
+;; functions:
+;; 
+;;     (defreg name htype conflict-list &optional argument-number)
+;;         define a hardware register and its argument number for the calling convention
+;; 
+;;     (defcode name pattern registers code)
+;;         match pattern in RTL and emit code for it
+;; 
+;;         patterns:
+;;             (= name expr)
+;;                 match expr and assign it to name
+;; 
+;;     (gen hreg-list code)
+;;         generate code for RTL, reg-list is a list of (reg . reg-type) hard register pairs
+;;         code is not an expression to be evaluated, but a list of "mcode"
+;; 
+;;     (reg . registers...)
+;;         define a hardware register that will be used in the instruction
+;; 
+;; types:
+;;     bblockh: a list of mcode
+;; 
+;;     mcode: machine code
+;;         example -- '3:00000000:rep 31'
+;; 
+;;         use (mcode-code mcode) to get the instruction
+;;         use (mcode-args mcode) to get the arguments
+;; 
 |#
 
+
+
+#| ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;; General Functions ;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (defun Nall nil (setq *optimize* '(auto-reg stupid-auto-reg v810-peephole)))
 (defun Oall nil (setq *optimize* '(auto-reg jump cse loop delete-zombi v810-peephole)))
 (setq *md-convit-optimize* t)
@@ -73,14 +80,14 @@ types:
 (defun md-expand-push-arg (arg argsp) (let* ((htype (expr-htype arg)) (expr (make-expr 'set htype (list (make-expr 'auto 'i4 (+ argsp *mdl-stack-arg-offset*)) arg)))) (cond ((and (fixnum-p htype) (md-expand-setn (car (expr-args expr)) (car (expr-args (cadr (expr-args expr)))) htype))) (t (emit-ccode 'expr expr)))))
 (defun md-expand-pop-args (nbyte))
 
-#| prints loading progress for this file |#
 (defun loadmsg (msg &rest args) (when *debug* (apply 'format t msg args)))
 
-#| math |#
 (defun 2^n-p (n) (= (logcount n) 1))
 (defun log2 (n) (loglength (rshu n 1)))
 
-#| define registers |#
+#| ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;; Register Definitions ;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "0")
 
 (defreg a.b i1 (conflict a.w) (param 0))
@@ -102,7 +109,6 @@ types:
 (defreg $a.w i2 (conflict $a.b))
 (defreg $c.w i2 (conflict $c.b))
 
-#| CSP = constraint satisfaction problem |#
 (defcsp B-regs nil (a.b x.b y.b))
 (defcsp W-regs nil (a.w x.w y.w))
 (defcsp A-regs nil (a.w))
@@ -110,14 +116,17 @@ types:
 (defcsp M16-regs nil ($2.w $4.w $6.w $8.w $a.w $c.w))
 (defcsp W-regs-for-call-general nil ())
 (setq *md-callee-save-regs* nil)
-#| (setq *md-callee-save-regs* '(r20B r21B r22B r23B r24B r25B r20H r21H r22H r23H r24H r25H r20W r21W r22W r23W r24W r25W r20F r21F r22F r23F r24F r25F)) |#
 (setq *md-caller-save-regs* '(a.w x.w y.w))
 (defcsp caller-save-regs nil (a.w x.w y.w))
 (dolist (regs '(B-regs W-regs)) (let ((W-regs (cdr (get 'W-regs 'defcsp)))) (dolist (r (cdr (get regs 'defcsp))) (put r 'W-reg (pop W-regs)))))
 (dolist (regs '(M8-regs M16-regs)) (let ((M16-regs (cdr (get 'M16-regs 'defcsp)))) (dolist (r (cdr (get regs 'defcsp))) (put r 'M-reg (pop M16-regs)))))
 
+
+#| ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;; Addressing mode constraints and properties ;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "1")
-#| addressing mode? |#
+
 (defcsp am-sp (a) (auto i2 (= a)))
 (defcsp am-const (c) (const i2 (= c * not-gpoffset-p)))
 (defcsp am-gpoffset (g) (const i2 (= g * gpoffset-p)))
@@ -131,6 +140,12 @@ types:
 (defcsp co-one (htype) (const htype (= c * one-p)))
 (defun expr-not-reg-p (expr) (not (eq (expr-car expr) 'reg)))
 
+In the context of a compiler, "ccode" could refer to the intermediate representation or the internal representation of the code being compiled. This representation is typically used as an intermediate step between the source code and the final machine code or assembly code. It allows the compiler to perform various optimizations and transformations on the code before generating the final output.
+
+
+#| ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;; Top Level "Constraint" Code ;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "2")
 (defcode getreg (get i1 (= x (reg))) (reg r))
 (defcode getreg (get i2 (= x (reg))) (reg r))
@@ -224,6 +239,10 @@ types:
 (defcode pop (set i1 (= x (hreg) B-regs) (get i1 (tos))) (gen nil (*pop-i1 'x)))
 (defcode pop (set i2 (= x (hreg) W-regs) (get i2 (tos))) (gen nil (*pop-i2 'x)))
 
+
+#| ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;; Get ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "3")
 (defcode geti1-general (get i1 (= p (* i2))) (reg r p) (gen ((r . B-regs) (p . W-regs)) (ld (dx 0 'p) 'r)))
 (defcode geti1-dx (get i1 am-dx) (reg r x) (gen ((r . B-regs) (x . W-regs)) (ld (dx 'd 'x) 'r)))
@@ -264,6 +283,10 @@ types:
                 ((yreg-p r) (emit-mcode (list 'ldy (list 'sp a))))
                 (t (emit-mcode (list 'geti2-sp (list 'sp a)))) ))))
 
+
+#| ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;; Set ;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "4")
 (defcode setn-general
     (set (= n) (= p) (get * (= q)))
@@ -368,6 +391,10 @@ types:
                 ((yreg-p r) (emit-mcode (list 'sty (list 'sp a)))) ))))
 (defcode seti2-sp-zero (set i2 am-sp (co-zero i2)) (reg) (gen nil (sta r0W (sp 'a))))
 
+
+#| ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;; Constant Value Loading ;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "5")
 (defcode consti1-general (const i1 (= c)) (reg r)
     (gen ((r . B-regs))
@@ -385,15 +412,29 @@ types:
                 ('x.w (emit-mcode (list 'ldx (list 'i2 c))))
                 ('y.w (emit-mcode (list 'ldy (list 'i2 c))))
                 (t (emit-mcode (list 'consti2-general (list 'i2 c)))) ))))
+
+
+#| ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;; Automatic Value ;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "6")
+
 (defcode auto-general (auto i2 (= a)) (reg r) (gen ((r . W-regs)) (movea (i2 'a) sp 'r)))
 
-#| type conversions |#
+
+#| ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;; Type Conversions ;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "7")
+
 (defcode convsxi2/i1-general (convsx i2 (= s (* i1))) (reg r s) (gen ((r . W-regs) (s . B-regs)) (mov 's 'r)))
 (defcode convzxi2/i1-general (convzx i2 (= s (* i1))) (reg r s) (gen ((r . W-regs) (s . B-regs)) (andi (i2 255) 's 'r)))
 (defcode conviti1/i2-general (convit i1 (= s (* i2))) (reg r s) (gen ((r . B-regs) (s . W-regs)) (mov 's 'r) (shl 24 'r) (sar 24 'r)))
 
+
+#| ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;; Type Conversions ;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "8")
 
 (defcode negi2-general (neg i2 (= r)) (reg r r) (gen ((r . W-regs)) (not 'r 'r) (add (i2 1) 'r)))
@@ -476,21 +517,14 @@ types:
 (defcode rshui4-general (rshu i4 (= r) (= s)) (reg r r s) (gen ((r . W-regs) (s . W-regs)) (shr 's 'r)))
 (defcode rshui4-general (rshu i4 (= r) (co-fixnum c)) (reg r r) (gen ((r . W-regs)) (shr (i4 'c) 'r)))
 
+
+#| ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;; Jump / Control Flow  ;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "9")
 
 (defcsp jcode (jmc) (= jmc * ((tsteq jmp-eq) (tstne jmp-ne) (tstlt jmp-lt) (tstltu jmp-ltu) (tstle jmp-le) (tstleu jmp-leu) (tstgt jmp-gt) (tstgtu jmp-gtu) (tstge jmp-ge) (tstgeu jmp-geu))))
 (defcode jump1 (jump1 la) (gen nil (jmp-1 'la)))
-
-#|
-(convsx i2
-    (get i1 (reg "T-0"))))
-
-2:(jump2
-     (tstge i2 
-            (get i2 (add i2 (get i2 (const i2 "MEM_4DC6")) (const i2 62))) 
-            (get i2 (reg "t.1")))
-            "L1")
-|#
 
 (defcode jump2i2-general (jump2 ((jcode jmc) * (= r (* i2)) (= p (* i2))) la)
     (reg nil r p)
@@ -525,19 +559,6 @@ types:
                 (t (emit-mcode (list 'jump2i2-const (list 'i2 c)))))
             (emit-mcode (list jmc la)) )))
 
-#|
-(defcode convsxi2/i1-general (convsx i2 (= s (* i1)))
-    (reg r s)
-    (gen ((r . W-regs) (s . B-regs)
-        #| no op |#)))
-|#
-
-#|
-(defcode getreg
-    (get i1 (= x (reg)))
-    (reg r))
-|#
-
 (defcode jump2f4-general (jump2 ((jcode jmc) * (= r (* f4)) (= p (* f4))) la) (reg nil r p) (gen ((r . F-regs) (p . F-regs)) (cmpf.s 'p 'r) ('jmc 'la)))
 (defcode jumpn (jumpn (= r) calist) (reg nil r) (gen ((r . W-regs)) (progn (emit-jumpn r calist))))
 (defun emit-jumpn (reg calist) (dolist (c calist) (setq (sent-scc (cadr c)) 'caselabel)) (let ((dlabel (genlabel))) (setq (sent-scc dlabel) 'caselabel) (emit-jumpn-rec reg calist dlabel) (emit-mcode (list 'def dlabel))))
@@ -553,7 +574,12 @@ types:
 (defun emit-jumpn-tables nil (dolist (table *mdl-jumpn-table-list*) (emit-acode-changeseg "const") (emit-acode-align 4) (emit-acode-def (sent-asmname (car table))) (dolist (e (cdr table)) (emit-acode-data 'i4 e))) (setq *mdl-jumpn-table-list* nil))
 (defcode label (label la) (gen nil (def 'la)))
 
+
+#| ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;; Prologue and Epilogue  ;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "a")
+
 (extern *cfun-name* *cfun-args-htype* *cfun-return-htype* *cfun-ahtype* *cfun-param-list* *cfun-local-list* *cfun-local-size* *cfun-tmp-list* *cfun-tmp-size* *cfun-args-size* *cfun-is-leaf-p*)
 (defvar *mdl-frame-size* 0)
 (defvar *mdl-arg* 0)
@@ -563,7 +589,7 @@ types:
 (defcode prologue (prologue)
     (gen nil
     (progn
-        #| calculate stack etc |#
+        #| ;; calculate stack etc |#
         (setq *mdl-arg* 0)
         (let ((frame 0))
             (incf frame *cfun-args-size*)
@@ -579,23 +605,23 @@ types:
             (incf frame *mdl-arg*)
             (dolist (s *cfun-tmp-list*) (incf (sent-offset s) frame))
             (incf frame *cfun-tmp-size*)
-            #| hardware registers used by the function |#
+            #| ;; hardware registers used by the function |#
             (setq *cfun-hreg-list* (delq 'nil *cfun-hreg-list*))
             (dolist (reg *md-caller-save-regs*) (setq *cfun-hreg-list* (delq reg *cfun-hreg-list*)))
             (setq *mdl-hreg-save-area* frame *mdl-hreg-save-area-size* (* 4 (length *cfun-hreg-list*)))
             (incf frame *mdl-hreg-save-area-size*)
-            #| (unless *cfun-is-leaf-p* (incf frame 4)) |#
+            #| ;; (unless *cfun-is-leaf-p* (incf frame 4)) |#
             (setq *mdl-frame-size* frame)
             (dolist (s *cfun-param-list*)
                 (incf (sent-offset s) (+ *mdl-frame-size* *mdl-stack-arg-offset*)))))
-        #| print info |#
+        #| ;; print info |#
         (progn
             (emit-mcode 'comment (format nil "framesize %d = %d(args) + %d(local) + %d(tmp) + %d(saveregs) + %d(savelp)" *mdl-frame-size* *cfun-args-size* *cfun-local-size* *cfun-tmp-size* *mdl-hreg-save-area-size* (if *cfun-is-leaf-p* 0 0)))
             (emit-mcode 'comment (format nil "used callee save regs = %t" *cfun-hreg-list*))
             (dolist (s *cfun-param-list*) (emit-mcode 'comment (format nil "param %T = (auto %d)" (sent-name s) (sent-offset s))))
             (dolist (s *cfun-local-list*) (emit-mcode 'comment (format nil "local %T = (auto %d)" (sent-name s) (sent-offset s))))
             (dolist (s *cfun-tmp-list*) (emit-mcode 'comment (format nil "tmp   %T = (auto %d)" (sent-name s) (sent-offset s)))))
-        #| emit code |#
+        #| ;; emit code |#
         (progn
             (emit-mcode (list 'rep (list 'i1 31)))
             (unless (zerop *mdl-frame-size*)
@@ -604,19 +630,15 @@ types:
                 (emit-mcode 'tdc)
                 (emit-mcode (list 'adc (- *mdl-frame-size*)))
                 (emit-mcode 'tcd)
-                (emit-mcode 'pla)
-                )
-            #| (unless (zerop *mdl-frame-size*) (emit-mcode (list 'add (list 'i4 (- *mdl-frame-size*)) 'sp))) |#
-            #| (unless *cfun-is-leaf-p* (emit-mcode (list 'st.w 'lp (list 'sp (list 'sub *mdl-frame-size* 4))))) |#
-            (unless (zerop *mdl-hreg-save-area-size*) (let ((off *mdl-hreg-save-area*)) (dolist (reg *cfun-hreg-list*) (emit-mcode (list 'st.w reg (list 'sp (posincf off 4)))))))
-            )))
+                (emit-mcode 'pla) )
+            (unless (zerop *mdl-hreg-save-area-size*)
+                (let ((off *mdl-hreg-save-area*))
+                    (dolist (reg *cfun-hreg-list*)
+                        (emit-mcode (list 'st.w reg (list 'sp (posincf off 4))))))))))
 
 (defcode epilogue (epilogue)
     (gen nil
     (progn
-        #| (unless *cfun-is-leaf-p* (emit-mcode (list 'ld.w (list 'sp (list 'sub *mdl-frame-size* 4)) 'lp))) |#
-        #| (unless (zerop *mdl-hreg-save-area-size*) (let ((off *mdl-hreg-save-area*)) (dolist (reg *cfun-hreg-list*) (emit-mcode (list 'ld.w (list 'sp (posincf off 4)) reg))))) |#
-        #| (unless (zerop *mdl-frame-size*) (emit-mcode (list 'add (list 'i4 *mdl-frame-size*) 'sp)))) |#
         (unless (zerop *mdl-frame-size*) (emit-mcode 'pld)))
     (rtl)))
 
@@ -632,12 +654,22 @@ types:
 (defcode ret-i1 (set i1 (ret) (= r)) (reg nil r) (gen ((r a.b))))
 (defcode ret-i2 (set i2 (ret) (= r)) (reg nil r) (gen ((r a.w))))
 
+
+#| ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;; Peephole  ;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "b")
+
 (defun peephole-optimize (bblockh))
 (load "md-v810p.cl")
 (setq *mcode-bra-offset* nil)
 
+
+#| ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;; Assembly Listing Emit Functions  ;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "c")
+
 (setq *md-no-underscore* nil)
 (defvar *mdl-lstatic/string-id* 0)
 (defun make-asm-name (name class) (ecase class ((extern global static) (if *md-no-underscore* name (format nil "_%s" name))) (lstatic (format nil "%s@%d" name (incf *mdl-lstatic/string-id*))) (string (format nil "%s@%d" name (incf *mdl-lstatic/string-id*)))))
@@ -725,4 +757,6 @@ types:
                     ((add adda) (apply #'format nil "%T+%T" cargs))
                     ((sub suba) (apply #'format nil (if (consp (cadr args)) "%T-(%T)" "%T-%T") cargs))
                     (neg (apply #'format nil (if (consp (car args)) "-(%T)" "-%T") cargs)))))))
+
+
 (loadmsg "...")
