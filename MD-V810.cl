@@ -47,6 +47,7 @@
 #| ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;; General Functions ;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
+
 (defun Nall nil (setq *optimize* '(auto-reg stupid-auto-reg v810-peephole)))
 (defun Oall nil (setq *optimize* '(auto-reg jump cse loop delete-zombi v810-peephole)))
 (setq *md-convit-optimize* t)
@@ -84,6 +85,7 @@
 
 (defun 2^n-p (n) (= (logcount n) 1))
 (defun log2 (n) (loglength (rshu n 1)))
+
 
 #| ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;; Register Definitions ;;;;;;;;;;;;;;;;;;;
@@ -147,6 +149,7 @@ In the context of a compiler, "ccode" could refer to the intermediate representa
 ;;;;;;;;;;;;;;;;;; Top Level "Constraint" Code ;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "2")
+
 (defcode getreg (get i1 (= x (reg))) (reg r))
 (defcode getreg (get i2 (= x (reg))) (reg r))
 (defcode setreg (set i1 (= x (reg)) (= y)) (reg nil y))
@@ -244,6 +247,7 @@ In the context of a compiler, "ccode" could refer to the intermediate representa
 ;;;;;;;;;;;;;;;;;;;;;;;;; Get ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "3")
+
 (defcode geti1-general (get i1 (= p (* i2))) (reg r p) (gen ((r . B-regs) (p . W-regs)) (ld (dx 0 'p) 'r)))
 (defcode geti1-dx (get i1 am-dx) (reg r x) (gen ((r . B-regs) (x . W-regs)) (ld (dx 'd 'x) 'r)))
 (defcode geti1-const (get i1 am-const) (reg r) (gen ((r . B-regs)) (ld (dx 'c r0W) 'r)))
@@ -288,6 +292,7 @@ In the context of a compiler, "ccode" could refer to the intermediate representa
 ;;;;;;;;;;;;;;;;;;;;;;;;;;; Set ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "4")
+
 (defcode setn-general
     (set (= n) (= p) (get * (= q)))
     (reg nil p q)
@@ -396,6 +401,7 @@ In the context of a compiler, "ccode" could refer to the intermediate representa
 ;;;;;;;;;;;;;;;;; Constant Value Loading ;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "5")
+
 (defcode consti1-general (const i1 (= c)) (reg r)
     (gen ((r . B-regs))
         (progn
