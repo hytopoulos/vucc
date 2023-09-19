@@ -1,22 +1,14 @@
 (dotimes (i 32)
-    (dolist (type '(B H W F))
+    (dolist (type '(B W))
         (let ((regname (format nil "r%d%t" i type))) (put (intern regname) 'regno (read-tree (substring regname 1 -1))))))
-
-(put 'sp 'regno 3)
-(put 'gp 'regno 4)
-(put 'lp 'regno 31)
 
 (defun get-regno (regsym) (get regsym 'regno))
 (defun peephole-optimize (bblockh)
-
-#| replace below with (sf-peep bblockh) |#
-
-(when (memq 'v810-peephole *optimize*)
+    #| replace below with (sf-peep bblockh) |#
+    (when (memq 'sf-peep *optimize*)
         (when (memq 'peephole *debug*)
-            (format t "=== v810-peephole\n"))
-        (do-bblock (b bblockh) (peep-mcode (bblock-mcode b))))
-
-)
+            (format t "=== sf-peep\n"))
+        (do-bblock (b bblockh) (sf-peep bblockh))))
 
 (defun delete-mcode (m)
     (setq (mcode-next (mcode-prev m)) (mcode-next m) (mcode-prev (mcode-next m)) (mcode-prev m))

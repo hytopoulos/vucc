@@ -1,7 +1,7 @@
 (load "tree-lib.cl")
 (defvar *debug* '(pass peep peephole dflow-life bind-hreg connect-hreg confirm-move-optimize-in-fixup-hreg loop-optimize reduce-cse reduce-bblock-expr reduce-jump reduce-mcode generate-mcode generate-acode split-reg))
 (defvar *verify* nil)
-(defvar *optimize* '(auto-reg split-reg jump cse loop delete-zombi peep-stld peep-convzx816 peep-loadconst peep-merge816))
+(defvar *optimize* '(sf-peep auto-reg split-reg jump cse loop delete-zombi peep-stld peep-convzx816 peep-loadconst peep-merge816))
 (extern *cfun-name*)
 (push 'confirm-move-optimize-in-fixup-hreg *debug*)
 (setq *gc-control* 200000 *notify-gc* nil)
