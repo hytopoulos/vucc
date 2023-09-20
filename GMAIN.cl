@@ -1,7 +1,7 @@
 (extern *mdl-asm-name*)
 (extern *debug* *notify-gc*)
 
-(defvar *usage* "Usage: %T [options...] scode object\n\noptions:\n-vReport compiling function.\n-asm asmnameSpecify Assembler/Linker system name.\n-Nsplit-regNo optimize for split register life interval.\n-NxmulNo optimize for expand multiply with small const.\n-NcseNo optimize for reduce common sub expression.\n-NallNo optimize at all.\n-Oall  Do all optimize.\n-no-underscoreExternal name is not prefixed by `_'.\n-load-md mdfile Loading md file.\n-load fileUniversal option.\n-eval formUniversal option.\n")
+(defvar *usage* "Usage: %T [options...] scode object\n\noptions:\n-v		Report compiling function.\n-asm asmname	Specify Assembler/Linker system name.\n-Nsplit-reg	No optimize for split register life interval.\n-Nxmul		No optimize for expand multiply with small const.\n-Ncse		No optimize for reduce common sub expression.\n-Nall		No optimize at all.\n-Oall  		Do all optimize.\n-no-underscore	External name is not prefixed by `_'.\n-load-md mdfile Loading md file.\n-load file	Universal option.\n-eval form	Universal option.\n")
 
 (defun main (args)
     #| comment below to enable debugging |#
