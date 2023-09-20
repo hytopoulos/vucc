@@ -87,6 +87,8 @@
 (defcsp B-regs nil (a.b x.b y.b))
 (defcsp W-regs nil (a.w x.w y.w))
 (defcsp A-regs nil (a.w))
+(defcsp IDX8-regs nil (x.b y.b))
+(defcsp IDX16-regs nil (x.w y.w))
 
 #|;; Virtual registers ;;|#
 (defreg $2.b i8 (conflict $2.w))
@@ -105,14 +107,14 @@
 (defreg $a.w i16 (conflict $a.b))
 (defreg $c.w i16 (conflict $c.b))
 
-(defcsp M8-regs nil ($2.b $4.b $6.b $8.b $a.b $c.b))
-(defcsp M16-regs nil ($2.w $4.w $6.w $8.w $a.w $c.w))
+(defcsp V8-regs nil ($2.b $4.b $6.b $8.b $a.b $c.b))
+(defcsp V16-regs nil ($2.w $4.w $6.w $8.w $a.w $c.w))
 (defcsp W-regs-for-call-general nil ())
 (setq *md-callee-save-regs* nil)
 (setq *md-caller-save-regs* '(a.w x.w y.w))
 (defcsp caller-save-regs nil (a.w x.w y.w))
 (dolist (regs '(B-regs W-regs)) (let ((W-regs (cdr (get 'W-regs 'defcsp)))) (dolist (r (cdr (get regs 'defcsp))) (put r 'W-reg (pop W-regs)))))
-(dolist (regs '(M8-regs M16-regs)) (let ((M16-regs (cdr (get 'M16-regs 'defcsp)))) (dolist (r (cdr (get regs 'defcsp))) (put r 'M-reg (pop M16-regs)))))
+(dolist (regs '(V8-regs V16-regs)) (let ((V16-regs (cdr (get 'V16-regs 'defcsp)))) (dolist (r (cdr (get regs 'defcsp))) (put r 'V-reg (pop V16-regs)))))
 
 
 #|;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -142,78 +144,83 @@
 (defun expr-not-const-p (expr) (not (eq (expr-car expr) 'const)))
 
 
-#| ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+#|;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;; Top Level "Constraint" Code ;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "2")
 
-#| match tiling-bblock-ccode pass |#
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode getreg
     #|;; pattern: (get i8 (reg _x_)) ;;|#
     (get i8 (= x (reg)))
     #|;; registers: out r ;;|#
     (reg r))
 
-#| match tiling-bblock-ccode pass |#
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode getreg
     #|;; pattern: (get i16 (reg _x_)) ;;|#
     (get i16 (= x (reg)))
     #|;; registers: out r ;;|#
     (reg r))
 
-#| match tiling-bblock-ccode pass |#
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode setreg
     #|;; pattern: (set i8 (reg _x_) (_y_)) ;;|#
     (set i8 (= x (reg)) (= y))
     #|;; registers: in y ;;|#
     (reg nil y))
 
-#| match tiling-bblock-ccode pass |#
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode setreg
     #|;; pattern: (set i16 (reg _x_) (_y_)) ;;|#
     (set i16 (= x (reg)) (= y))
     #|;; registers: in y ;;|#
     (reg nil y))
 
-#| match fixup-hreg pass |#
-(defcode load (set i8 (= x (hreg) B-regs) (get i8 am-sp))
+#|;; match fixup-hreg pass ;;|#
+(defcode load
     #|;; pattern: (set i8 (hreg _x_) (get i8 (auto i16 _a_)) ;;|#
+    (set i8 (= x (hreg) B-regs) (get i8 am-sp))
     (gen nil
         (progn
         (cond   ((areg-p x) (emit-mcode (list 'lda (list 'sp a))))
                 ((xreg-p x) (emit-mcode (list 'ldx (list 'sp a))))
                 ((yreg-p x) (emit-mcode (list 'ldy (list 'sp a)))) ))))
 
-#| match fixup-hreg pass |#
-(defcode load (set i16 (= x (hreg) W-regs) (get i16 am-sp))
+#|;; match fixup-hreg pass ;;|#
+(defcode load
     #|;; pattern: (set i16 (hreg _x_) (get i16 (auto i16 _a_)) ;;|#
+    (set i16 (= x (hreg) W-regs) (get i16 am-sp))
     (gen nil
         (progn
         (cond   ((areg-p x) (emit-mcode (list 'lda (list 'sp a))))
                 ((xreg-p x) (emit-mcode (list 'ldx (list 'sp a))))
                 ((yreg-p x) (emit-mcode (list 'ldy (list 'sp a)))) ))))
 
-#| match fixup-hreg pass |#
-(defcode store (set i8 am-sp (get i8 (= x (hreg) B-regs)))
+#|;; match fixup-hreg pass ;;|#
+(defcode store
     #|;; pattern: (set i8 (auto i8 _a_) (get i8 (hreg _x_)) ;;|#
+    (set i8 am-sp (get i8 (= x (hreg) B-regs)))
     (gen nil
         (progn
         (cond   ((areg-p x) (emit-mcode (list 'sta (list 'sp a))))
                 ((xreg-p x) (emit-mcode (list 'stx (list 'sp a))))
                 ((yreg-p x) (emit-mcode (list 'sty (list 'sp a)))) ))))
 
-#| match fixup-hreg pass |#
-(defcode store (set i16 am-sp (get i16 (= x (hreg) W-regs)))
+#|;; match fixup-hreg pass ;;|#
+(defcode store
     #|;; pattern: (set i16 (auto i16 _a_) (get i16 (hreg _x_)) ;;|#
+    (set i16 am-sp (get i16 (= x (hreg) W-regs)))
     (gen nil
         (progn
         (cond   ((areg-p x) (emit-mcode (list 'sta (list 'sp a))))
                 ((xreg-p x) (emit-mcode (list 'stx (list 'sp a))))
                 ((yreg-p x) (emit-mcode (list 'sty (list 'sp a)))) ))))
 
-#| match fixup-hreg pass |#
-(defcode move (set i8 (= x (hreg) B-regs) (get i8 (= y (hreg) B-regs)))
+#|;; match fixup-hreg pass ;;|#
+(defcode move
     #|;; pattern: (set i8 (hreg _x_) (get i8 (hreg _y_)) ;;|#
+    (set i8 (= x (hreg) B-regs) (get i8 (= y (hreg) B-regs)))
     (gen nil
         (progn
         (cond   ((and (xreg-p x) (yreg-p y)) (emit-mcode 'tyx))
@@ -223,60 +230,66 @@
                 ((and (areg-p x) (xreg-p y)) (emit-mcode 'txa))
                 ((and (areg-p x) (yreg-p y)) (emit-mcode 'tya)) ))))
 
-#| match fixup-hreg pass |#
-(defcode move (set i8 (= x (hreg) B-regs) (get i8 (= y (hreg) M8-regs)))
+#|;; match fixup-hreg pass ;;|#
+(defcode move
     #|;; pattern: (set i8 (hreg _x_) (get i8 (hreg _y_)) ;;|#
+    (set i8 (= x (hreg) B-regs) (get i8 (= y (hreg) V8-regs)))
     (gen nil
         (progn
         (cond   ((areg-p x) (emit-mcode (list 'lda y)))
                 ((xreg-p x) (emit-mcode (list 'ldx y)))
                 ((yreg-p x) (emit-mcode (list 'ldy y))) ))))
 
-#| match fixup-hreg pass |#
-(defcode move (set i8 (= x (hreg) M8-regs) (get i8 (= y (hreg) B-regs)))
+#|;; match fixup-hreg pass ;;|#
+(defcode move
     #|;; pattern: (set i8 (hreg _x_) (get i8 (hreg _y_)) ;;|#
+    (set i8 (= x (hreg) V8-regs) (get i8 (= y (hreg) B-regs)))
     (gen nil
         (progn
         (cond   ((areg-p y) (emit-mcode (list 'sta x)))
                 ((xreg-p y) (emit-mcode (list 'stx x)))
                 ((yreg-p y) (emit-mcode (list 'sty x))) ))))
 
-#| match fixup-hreg pass |#
-(defcode move (set i16 (= x (hreg) W-regs) (get i16 (= y (hreg) W-regs)))
-    #|;; pattern: (set i16 (hreg _x_) (get i16 (hreg _y_)) ;;|#
-    (gen nil
-        (progn
-        (cond   ((and (xreg-p x) (yreg-p y)) (emit-mcode 'tyx))
-                ((and (xreg-p x) (areg-p y)) (emit-mcode 'tax))
-                ((and (yreg-p x) (xreg-p y)) (emit-mcode 'txy))
-                ((and (yreg-p x) (areg-p y)) (emit-mcode 'tay))
-                ((and (areg-p x) (xreg-p y)) (emit-mcode 'txa))
-                ((and (areg-p x) (yreg-p y)) (emit-mcode 'tya)) ))))
-
-#| match fixup-hreg pass |#
-(defcode move (set i16 (= x (hreg) W-regs) (get i16 (= y (hreg) M16-regs)))
-    #|;; pattern: (set i16 (hreg _x_) (get i16 (hreg _y_)) ;;|#
-    (gen nil
-        (progn
-        (cond   ((areg-p x) (emit-mcode (list 'lda y)))
-                ((xreg-p x) (emit-mcode (list 'ldx y)))
-                ((yreg-p x) (emit-mcode (list 'ldy y))) ))))
-
-#| match fixup-hreg pass |#
-(defcode move (set i16 (= x (hreg) M16-regs) (get i16 (= y (hreg) W-regs)))
-    #|;; pattern: (set i16 (hreg _x_) (get i16 (hreg _y_)) ;;|#
-    (gen nil
-        (progn
-        (cond   ((areg-p y) (emit-mcode (list 'sta x)))
-                ((xreg-p y) (emit-mcode (list 'stx x)))
-                ((yreg-p y) (emit-mcode (list 'sty x))) ))))
-
-#| match fixup-hreg pass |#
+#|;; match fixup-hreg pass ;;|#
 (defcode move
     #|;; pattern: (set i16 (hreg _x_) (get i16 (hreg _y_)) ;;|#
-    (set i16 (= x (hreg) M16-regs) (get i16 (= y (hreg) M16-regs)))
+    (set i16 (= x (hreg) W-regs) (get i16 (= y (hreg) W-regs)))
+    (gen nil
+        (progn
+        (cond   ((and (xreg-p x) (yreg-p y)) (emit-mcode 'tyx))
+                ((and (xreg-p x) (areg-p y)) (emit-mcode 'tax))
+                ((and (yreg-p x) (xreg-p y)) (emit-mcode 'txy))
+                ((and (yreg-p x) (areg-p y)) (emit-mcode 'tay))
+                ((and (areg-p x) (xreg-p y)) (emit-mcode 'txa))
+                ((and (areg-p x) (yreg-p y)) (emit-mcode 'tya)) ))))
+
+#|;; match fixup-hreg pass ;;|#
+(defcode move
+    #|;; pattern: (set i16 (hreg _x_) (get i16 (hreg _y_)) ;;|#
+    (set i16 (= x (hreg) W-regs) (get i16 (= y (hreg) V16-regs)))
+    (gen nil
+        (progn
+        (cond   ((areg-p x) (emit-mcode (list 'lda y)))
+                ((xreg-p x) (emit-mcode (list 'ldx y)))
+                ((yreg-p x) (emit-mcode (list 'ldy y))) ))))
+
+#|;; match fixup-hreg pass ;;|#
+(defcode move
+    #|;; pattern: (set i16 (hreg _x_) (get i16 (hreg _y_)) ;;|#
+    (set i16 (= x (hreg) V16-regs) (get i16 (= y (hreg) W-regs)))
+    (gen nil
+        (progn
+        (cond   ((areg-p y) (emit-mcode (list 'sta x)))
+                ((xreg-p y) (emit-mcode (list 'stx x)))
+                ((yreg-p y) (emit-mcode (list 'sty x))) ))))
+
+#|;; match fixup-hreg pass ;;|#
+(defcode move
+    #|;; pattern: (set i16 (hreg _x_) (get i16 (hreg _y_)) ;;|#
+    (set i16 (= x (hreg) V16-regs) (get i16 (= y (hreg) V16-regs)))
     #|;; registers: out r ;;|#
     (reg r)
+    #|;;  out: {a x y}   in: {}  ;;|#
     (gen ((r . W-regs))
         (progn
         (cond   ((areg-p r) (emit-mcode (list 'lda y))
@@ -287,13 +300,13 @@
                             (emit-mcode (list 'sty x))) ))))
 
 #|;; these are unused ;;|#
-#| match fixup-hreg pass |#
+#|;; match fixup-hreg pass ;;|#
 (defcode push (set i8 (tos) (get i8 (= x (hreg) B-regs))) (gen nil (*push-i8 'x)))
-#| match fixup-hreg pass |#
+#|;; match fixup-hreg pass ;;|#
 (defcode push (set i16 (tos) (get i16 (= x (hreg) W-regs))) (gen nil (*push-i16 'x)))
-#| match fixup-hreg pass |#
+#|;; match fixup-hreg pass ;;|#
 (defcode pop (set i8 (= x (hreg) B-regs) (get i8 (tos))) (gen nil (*pop-i8 'x)))
-#| match fixup-hreg pass |#
+#|;; match fixup-hreg pass ;;|#
 (defcode pop (set i16 (= x (hreg) W-regs) (get i16 (tos))) (gen nil (*pop-i16 'x)))
 
 #|;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -301,14 +314,14 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "3")
 
-#| match tiling-bblock-ccode pass |#
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode geti8-dx
     #|;; pattern: (get i16 (add i8 (_x_) (const i16 _d_))) ;;|#
     (get i8 am-dx)
     #|;; registers: out r, in x ;;|#
     (reg r x)
     #|;;  out: {a x y}   in: {x y}  ;;|#
-    (gen ((r . B-regs) (x x.b y.b))
+    (gen ((r . B-regs) (x . IDX8-regs))
         (progn
         (cond
             ((areg-p r)
@@ -321,8 +334,9 @@
             (cond   ((areg-p x) (emit-mcode (list 'ldy (list 'mem8 d) 'a)))
                     ((xreg-p x) (emit-mcode (list 'ldy (list 'mem8 d) 'x))))) ))))
 
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode geti8-const
-    #|;; pattern: (get i8 (const i16 _c_))) ;;|#
+    #|;; pattern: (get i8 (const i16 _c_)) ;;|#
     (get i8 am-const)
     #|;; registers: out r ;;|#
     (reg r)
@@ -332,9 +346,10 @@
         (cond   ((areg-p r) (emit-mcode (list 'lda (list 'mem8 c))))
                 ((xreg-p r) (emit-mcode (list 'ldx (list 'mem8 c))))
                 ((yreg-p r) (emit-mcode (list 'ldy (list 'mem8 c)))) ))))
-#| match generate-mcode pass |#
+
+#|;; match generate-mcode pass ;;|#
 (defcode geti8-sp
-    #|;; pattern: (get i8 (auto i16 _s_))) ;;|#
+    #|;; pattern: (get i8 (auto i16 _s_)) ;;|#
     (get i8 am-sp)
     #|;; registers: out r ;;|#
     (reg r)
@@ -345,14 +360,14 @@
                 ((xreg-p r) (emit-mcode (list 'ldx (list 'sp a))))
                 ((yreg-p r) (emit-mcode (list 'ldy (list 'sp a)))) ))))
 
-#| match tiling-bblock-ccode pass |#
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode geti16-dx
     #|;; pattern: (get i16 (add i16 (_x_) (const i16 _d_))) ;;|#
     (get i16 am-dx)
     #|;; registers: out r, in x ;;|#
     (reg r x)
     #|;;  out: {a x y}   in: {x y}  ;;|#
-    (gen ((r . W-regs) (x x.w y.w))
+    (gen ((r . W-regs) (x . IDX16-regs))
         (progn
         (cond
             ((areg-p r)
@@ -365,8 +380,9 @@
             (cond   ((areg-p x) (emit-mcode (list 'ldy (list 'mem16 d) 'a)))
                     ((xreg-p x) (emit-mcode (list 'ldy (list 'mem16 d) 'x))))) ))))
 
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode geti16-const
-    #|;; pattern: (get i16 (const i16 _c_))) ;;|#
+    #|;; pattern: (get i16 (const i16 _c_)) ;;|#
     (get i16 am-const)
     #|;; registers: out r ;;|#
     (reg r)
@@ -377,9 +393,9 @@
                 ((xreg-p r) (emit-mcode (list 'ldx (list 'mem16 c))))
                 ((yreg-p r) (emit-mcode (list 'ldy (list 'mem16 c)))) ))))
 
-#| match generate-mcode pass |#
+#|;; match generate-mcode pass ;;|#
 (defcode geti16-sp
-    #|;; pattern: (get i16 (auto i16 _s_))) ;;|#
+    #|;; pattern: (get i16 (auto i16 _s_)) ;;|#
     (get i16 am-sp)
     #|;; registers: out r ;;|#
     (reg r)
@@ -391,117 +407,122 @@
                 ((yreg-p r) (emit-mcode (list 'ldy (list 'sp a)))) ))))
 
 
-#| ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+#|;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;; Set ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "4")
 
-(defcode setn-general
-    (set (= n) (= p) (get * (= q)))
-    (reg nil p q)
-    (gen
-        ((p . W-regs) (q . W-regs))
-        ((mov 'p r29W)
-        (mov r0W r26W)
-        (mov 'q r30W)
-        (mov r0W r27W)
-        (progn (emit-mcode (list 'mov (list 'i4 (* n 8)) 'r28W)))
-        (movbsu))))
-
-(defcode seti8-general
-    (set i8 (= p (* i16)) (= r))
-    (reg nil p r)
-    (gen ((p . W-regs) (r . B-regs)) (seti8-general 'r (dx 0 'p))))
-
-(defcode seti8-general-zero
-    (set i8 (= p (* i16)) (co-zero i8))
-    (reg nil p)
-    (gen ((p . W-regs)) (seti8-general-zero r0B (dx 0 'p))))
-
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode seti8-dx
+    #|;; pattern: (set i8 (add i8 (_x_) (const i16 _d_)) (_r_)) ;;|#
     (set i8 am-dx (= r))
+    #|;;  registers: in x r  ;;|#
     (reg nil x r)
-    (gen ((x . W-regs) (r . B-regs)) (seti8-dx 'r (dx 'd 'x))))
+    #|;;  out: {}   in: {x y} {a}  ;;|#
+    (gen ((x . IDX8-regs) (r . A-regs))
+        (progn
+        (cond   ((xreg-p x) (emit-mcode (list 'sta (list 'mem16 d) 'x)))
+                ((yreg-p x) (emit-mcode (list 'sta (list 'mem16 d) 'y))) ))))
 
-(defcode seti8-dx-zero
-    (set i8 am-dx (co-zero i8))
-    (reg nil x)
-    (gen ((x . W-regs)) (seti8-dx-zero r0B (dx 'd 'x))))
-
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode seti8-const
+    #|;; pattern: (set i8 (const i16 _c_) (_r_)) ;;|#
     (set i8 am-const (= r))
+    #|;;  registers: in r  ;;|#
     (reg nil r)
-    (gen ((r . B-regs)) (seti8-const 'r (dx 'c r0W))))
+    #|;;  out: {}   in: {a x y}  ;;|#
+    (gen ((r . B-regs))
+        (progn
+        (cond   ((areg-p r) (emit-mcode (list 'sta (list 'mem8 c))))
+                ((xreg-p r) (emit-mcode (list 'stx (list 'mem8 c))))
+                ((yreg-p r) (emit-mcode (list 'sty (list 'mem8 c)))) ))))
 
-(defcode seti8-sp (set i8 am-sp (= r))
+#|;; match generate-mcode pass ;;|#
+(defcode seti8-sp
+    #|;; pattern: (set i8 (auto i16 _s_) (_r_)) ;;|#
+    (set i8 am-sp (= r))
+    #|;;  registers: in r  ;;|#
     (reg nil r)
+    #|;;  out: {}   in: {a x y}  ;;|#
     (gen ((r . B-regs))
         (progn
         (cond   ((areg-p r) (emit-mcode (list 'sta (list 'sp a))))
                 ((xreg-p r) (emit-mcode (list 'stx (list 'sp a))))
                 ((yreg-p r) (emit-mcode (list 'sty (list 'sp a)))) ))))
 
-(defcode seti8-sp-zero
-    (set i8 am-sp (co-zero i8))
-    (reg)
-    (gen nil (sta r0B (sp 'a))))
-
-(defcode seti16-general
-    (set i16 (= p (* i16)) (= r))
-    (reg nil p r)
-    (gen ((p . W-regs) (r . W-regs)) (seti16-general 'r (dx 0 'p))))
-
-(defcode seti16-general-convit (set i16 (= p (* i16)) (convit i16 (= r))) (reg nil p r) (gen ((p . W-regs) (r . W-regs)) (sta 'r (dx 0 'p))))
-
-(defcode seti16-general-zero (set i16 (= p (* i16)) (co-zero i16)) (reg nil p) (gen ((p . W-regs)) (stz.w 'p)))
-
-(defcode seti16-dx (set i16 am-dx (= r))
+#|;; match tiling-bblock-ccode pass ;;|#
+(defcode seti16-dx
+    #|;; pattern: (set i16 (add i16 (_x_) (const i16 _d_)) (_r_)) ;;|#
+    (set i16 am-dx (= r))
+    #|;;  registers: in x r  ;;|#
     (reg nil x r)
-    (gen ((x . W-regs) (r . A-regs))
+    #|;;  out: {}   in: {x y} {a}  ;;|#
+    (gen ((x . IDX16-regs) (r . A-regs))
         (progn
         (cond   ((xreg-p x) (emit-mcode (list 'sta (list 'mem16 d) 'x)))
                 ((yreg-p x) (emit-mcode (list 'sta (list 'mem16 d) 'y))) ))))
 
-(defcode seti16-dx-convit (set i16 am-dx (convit i16 (= r))) (reg nil x r) (gen ((x . W-regs) (r . W-regs)) (sta 'r (dx 'd 'x))))
-(defcode seti16-zero (set i16 (co-zero i16)) (reg nil x) (gen ((x . W-regs)) (stz.w 'x)))
+#|;; match tiling-bblock-ccode pass ;;|#
+(defcode seti16-virtual-zero
+    #|;; pattern: (set i16 (* i16 _p_) (const i16 0)) ;;|#
+    (set i16 (= p (* i16)) (co-zero i16))
+    #|;;  registers: in p ;;|#
+    (reg nil p)
+    #|;;  out: {}   in: {v}  ;;|#
+    (gen ((p . V16-regs))
+        (stz.w 'p)))
 
-(defcode seti16-const (set i16 am-const (= r))
+#|;; match tiling-bblock-ccode pass ;;|#
+(defcode seti16-const
+    #|;; pattern: (set i16 (const i16 _c_) (_r_)) ;;|#
+    (set i16 am-const (= r))
+    #|;;  registers: in r  ;;|#
     (reg nil r)
+    #|;;  out: {}   in: {a x y}  ;;|#
     (gen ((r . W-regs))
         (progn
         (cond   ((areg-p r) (emit-mcode (list 'sta (list 'mem16 c))))
                 ((xreg-p r) (emit-mcode (list 'stx (list 'mem16 c))))
                 ((yreg-p r) (emit-mcode (list 'sty (list 'mem16 c)))) ))))
 
-(defcode seti16-const-zero (set i16 am-const (= r (co-zero i16)))
+#|;; when this is put above seti16-const, it no longer has priority.. ;;|#
+#|;; note the (= r) ;;|#
+
+#|;; match tiling-bblock-ccode pass ;;|#
+(defcode seti16-const-zero
+    #|;; pattern: (set i16 (const i16 _c_) (const i16 0)) ;;|#
+    (set i16 am-const (= r (co-zero i16)))
     (reg nil)
     (gen nil
-    (stz.w (mem16 'c))))
+        (stz.w (mem16 'c))))
 
-(defcode seti16-const-convit (set i16 am-const (convit i16 (= r))) (reg nil r) (gen ((r . W-regs)) (sta 'r (dx 'c r0W))))
-
-(defcode seti16-sp (set i16 am-sp (= r))
+#|;; match generate-mcode pass ;;|#
+(defcode seti16-sp
+    #|;; pattern: (set i16 (auto i16 _s_) (_r_)) ;;|#
+    (set i16 am-sp (= r))
+    #|;;  registers: in r  ;;|#
     (reg nil r)
+    #|;;  out: {}   in: {a x y}  ;;|#
     (gen ((r . W-regs))
         (progn
         (cond   ((areg-p r) (emit-mcode (list 'sta (list 'sp a))))
                 ((xreg-p r) (emit-mcode (list 'stx (list 'sp a))))
                 ((yreg-p r) (emit-mcode (list 'sty (list 'sp a)))) ))))
 
-(defcode seti16-sp-zero (set i16 am-sp (co-zero i16)) (reg) (gen nil (sta r0W (sp 'a))))
-
 #|;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;; Constant Value Loading ;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "5")
 
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode consti8-general (const i8 (= c)) (reg r)
     (gen ((r . B-regs))
         (progn
-        (ecase r    ('a.b (emit-mcode (list 'ldab (list 'i8 c))))
-                    ('x.b (emit-mcode (list 'ldxb (list 'i8 c))))
-                    ('y.b (emit-mcode (list 'ldyb (list 'i8 c)))) ))))
+        (ecase r    ('a.b (emit-mcode (list 'lda (list 'i8 c))))
+                    ('x.b (emit-mcode (list 'ldx (list 'i8 c))))
+                    ('y.b (emit-mcode (list 'ldy (list 'i8 c)))) ))))
 
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode consti16-general (const i16 (= c)) (reg r)
     (gen ((r . W-regs))
         (progn
@@ -523,8 +544,11 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "7")
 
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode convsxi16/i8-general (convsx i16 (= s (* i8))) (reg r s) (gen ((r . W-regs) (s . B-regs)) (mov 's 'r)))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode convzxi16/i8-general (convzx i16 (= s (* i8))) (reg r s) (gen ((r . W-regs) (s . B-regs)) (andi (i16 255) 's 'r)))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode conviti8/i16-general (convit i8 (= s (* i16))) (reg r s) (gen ((r . B-regs) (s . W-regs)) (mov 's 'r) (shl 24 'r) (sar 24 'r)))
 
 
@@ -533,8 +557,10 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;|#
 (loadmsg "8")
 
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode negi16-general (neg i16 (= r)) (reg r r) (gen ((r . W-regs)) (not 'r 'r) (add (i16 1) 'r)))
 
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode inc (add i16 (= r) (const i16 (= c * incdec-p)))
     (reg r r)
     (gen ((r . W-regs))
@@ -544,23 +570,27 @@
                     ((xreg-p r) (emit-mcode 'inx))
                     ((yreg-p r) (emit-mcode 'iny)) )))))
 
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode addi16-const (add i16 (= r) (const i16 (= c * not-incdec-p)))
     (reg r r)
     (gen ((r . A-regs))
         (clc)
         (adc (i16 'c)) ))
 
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode addi16-mem (add i16 (= r) (get i16 (const i16 (= p))))
     (reg r r)
     (gen ((r a.w))
         (clc)
         (adc (mem16 'p)) ))
 
-(defcode addi16-general (add i16 (= r) (= p (reg)))
+#|;; match tiling-bblock-ccode pass ;;|#
+(defcode addi16-virtual (add i16 (= r) (= p (reg)))
     (reg r r p)
-    (gen ((r . A-regs) (p . M16-regs))
+    (gen ((r . A-regs) (p . V16-regs))
         (adc 'p)))
 
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode addi8-const (add i8 (= r) (const i8 (= c)))
     (reg r r)
     (gen ((r a.b))
@@ -571,44 +601,62 @@
             (progn
                 (emit-mcode (list 'clc))
                 (emit-mcode (list 'adc (list 'i8 c))) )))))
+
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode addi8-general (add i8 (= r) (= p (reg)))
     (reg r r p)
-    (gen ((r a.b) (p . M8-regs))
+    (gen ((r a.b) (p . V8-regs))
         (adc 'p)))
-(defcode subi16-general (sub i16 (= r) (= s))
+
+#|;; match tiling-bblock-ccode pass ;;|#
+(defcode subi16-virtual (sub i16 (= r) (= s))
     (reg r r s)
-    (gen ((r . A-regs) (s . M16-regs))
+    (gen ((r . A-regs) (s . V16-regs))
         (sec)
         (sbc.w 's)))
 
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode subi16-const (sub i16 (= r) (const i16 (= c)))
     (reg r)
     (gen ((r . A-regs))
         (sec)
         (sbc (i16 c)) ))
 
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode bandi16-general (band i16 (= r) (= p)) (reg r r p) (gen ((r . W-regs) (p . W-regs)) (and 'p 'r)))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode bandi16-const (band i16 (= r) (const i16 (= c)))
     (reg r r)
     (gen ((r . A-regs))
         (and (i16 'c))))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode bxori16-general (bxor i16 (= r) (= p)) (reg r r p) (gen ((r . W-regs) (p . W-regs)) (xor 'p 'r)))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode bxori16-const (bxor i16 (= x) (const i16 (= c))) (reg r x) (gen ((r . W-regs) (x . W-regs)) (progn (if (eq r x) (emit-mcode (list 'xor (list 'i4 c) r)) (emit-mcode (list 'xori (list 'i4 c) x r))))))
-(defcode bori16-general (bor i16 (= r) (= p))
+#|;; match tiling-bblock-ccode pass ;;|#
+(defcode bori16-virtual (bor i16 (= r) (= p))
     (reg r r p)
-    (gen ((r . A-regs) (p . M16-regs))
+    (gen ((r . A-regs) (p . V16-regs))
         (ora 'p)))
+
+#|;; match generate-mcode pass ;;|#
 (defcode bori16-sp (bor i16 (= r) (get i16 am-sp))
     (reg r r)
     (gen ((r . A-regs))
         (ora 's)))
+
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode bori16-const (bor i16 (= r) (const i16 (= c)))
     (reg r r)
     (gen ((r . A-regs))
         (ora (i16 'c))))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode bnoti16-general (bnot i16 (= r)) (reg r r) (gen ((r . W-regs)) (not 'r 'r)))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode muli16-general (mul i16 (= r) (= s)) (reg r r s) (gen ((r . W-regs) (s . W-regs)) (mul 's 'r)))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode muli16-const (mul i16 (= r) (co-fixnum n)) (reg r r) (gen ((r . W-regs)) (mul 'n 'r)))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode muli16-2^n (mul i16 (= r) (co-fixnum-2^n-p n))
     (reg r r)
     (gen ((r . A-regs))
@@ -616,32 +664,44 @@
         (dotimes (i (log2 n))
             (emit-mcode 'asl)))))
 
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode divi4-general (div i4 (= r) (= s)) (reg r r s) (gen ((r . W-regs) (s . W-regs)) (div 's 'r)))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode divi4-2^n (div i4 (= r) (co-fixnum-2^n-p n)) (reg r r) (gen ((r . W-regs)) (progn (emit-mcode (list 'sar (list 'i4 (log2 n)) r)))))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode divui4-general (divu i4 (= r) (= s)) (reg r r s) (gen ((r . W-regs) (s . W-regs)) (divu 's 'r)))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode divui4-2^n (divu i4 (= r) (co-fixnum-2^n-p n)) (reg r r) (gen ((r . W-regs)) (progn (emit-mcode (list 'shr (list 'i4 (log2 n)) r)))))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode modi16-general (mod i16 (= r) (= s)) (reg r r s) (gen ((r . W-regs) (s . W-regs)) (div 's 'r) (mov r30W 'r)))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode modui16-general (modu i16 (= r) (= s)) (reg r r s) (gen ((r . W-regs) (s . W-regs)) (divu 's 'r) (mov r30W 'r)))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode lshi16-general (lsh i16 (= r) (= s)) (reg r r s)
     (gen ((r . W-regs) (s . W-regs))
         (progn
             (emit-mcode (list 'asl 's 'r)))))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode lshi16-const (lsh i16 (= r) (co-fixnum c))
     (reg r r)
     (gen ((r . A-regs))
         (progn
         (dotimes (i c)
             (emit-mcode 'asl)))))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode rshi16-general (rsh i16 (= r) (= s))
     (reg r r s)
     (gen ((r . A-regs) (s . W-regs)) (sar 's 'r)))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode rshi16-const (rsh i16 (= r) (co-fixnum c))
     (reg r r)
     (gen ((r . A-regs))
         (progn
         (dotimes (i c)
             (emit-mcode 'lsr)))))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode rshui16-general (rshu i16 (= r) (= s)) (reg r r s) (gen ((r . W-regs) (s . W-regs)) (shr 's 'r)))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode rshui16-general (rshu i16 (= r) (co-fixnum c)) (reg r r) (gen ((r . W-regs)) (shr (i16 'c) 'r)))
 
 
@@ -651,17 +711,21 @@
 (loadmsg "9")
 
 (defcsp jcode (jmc) (= jmc * ((tsteq jmp-eq) (tstne jmp-ne) (tstlt jmp-lt) (tstltu jmp-ltu) (tstle jmp-le) (tstleu jmp-leu) (tstgt jmp-gt) (tstgtu jmp-gtu) (tstge jmp-ge) (tstgeu jmp-geu))))
+
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode jump1 (jump1 la) (gen nil (jmp-1 'la)))
 
-(defcode jump2i16-general (jump2 ((jcode jmc) * (= r (* i16)) (= p (* i16))) la)
+#|;; match tiling-bblock-ccode pass ;;|#
+(defcode jump2i16-virtual (jump2 ((jcode jmc) * (= r (* i16)) (= p (* i16))) la)
     (reg nil r p)
-    (gen ((r . A-regs) (p . M16-regs))
+    (gen ((r . A-regs) (p . V16-regs))
         (progn
         (cond   ((areg-p r) (emit-mcode (list 'cmp p)))
                 ((xreg-p r) (emit-mcode (list 'cpx p)))
                 ((yreg-p r) (emit-mcode (list 'cpy p))) )
             (emit-mcode (list jmc la)))))
 
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode jump2i16-mem (jump2 ((jcode jmc) * (= r (* i16)) (get i16 am-const)) la)
     (reg nil r)
     (gen ((r . W-regs))
@@ -671,23 +735,24 @@
                 ((yreg-p r) (emit-mcode (list 'cpy (list 'mem16 c)))) )
             (emit-mcode (list jmc la)))))
 
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode jump2i16-const-notzero (jump2 ((jcode jmc) * (= r (* i16)) (co-fixnum c)) la)
     (reg nil r)
     (gen ((r . W-regs))
         (progn
-        #| ;; hack to avoid bug in sf-peep where 'i2 generates extra 'mem16 [sub_2FD1C] |#
+        #|;; hack to avoid bug in sf-peep where 'i2 generates extra 'mem16 [sub_2FD1C] ;;|#
         (let* ((type (if (zerop c) 'i2 'i8)))
             (cond   ((areg-p r) (emit-mcode (list 'cmp (list type c))))
                     ((xreg-p r) (emit-mcode (list 'cpx (list type c))))
                     ((yreg-p r) (emit-mcode (list 'cpy (list type c)))) ))
             (emit-mcode (list jmc la)))))
-
-(defcode jump2f4-general (jump2 ((jcode jmc) * (= r (* f4)) (= p (* f4))) la) (reg nil r p) (gen ((r . F-regs) (p . F-regs)) (cmpf.s 'p 'r) ('jmc 'la)))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode jumpn (jumpn (= r) calist) (reg nil r) (gen ((r . W-regs)) (progn (emit-jumpn r calist))))
+
 (defun emit-jumpn (reg calist) (dolist (c calist) (setq (sent-scc (cadr c)) 'caselabel)) (let ((dlabel (genlabel))) (setq (sent-scc dlabel) 'caselabel) (emit-jumpn-rec reg calist dlabel) (emit-mcode (list 'def dlabel))))
 (defun emit-jumpn-rec (reg calist dlabel) (cond ((emit-jumpn-by-table-p calist) (emit-jumpn-by-table reg calist dlabel)) ((emit-jumpn-by-liner-p calist) (emit-jumpn-by-liner reg calist dlabel)) (t (let ((tmpl (genlabel))) (letl (calist1 center calist2) (emit-jumpn-split-calist calist) (emit-mcode (list 'cmp (list 'i4 (car center)) reg)) (emit-mcode (list 'jmp-eq (cadr center))) (emit-mcode (list 'jmp-gt tmpl)) (emit-jumpn-rec reg calist1 dlabel) (emit-mcode (list 'def tmpl)) (emit-jumpn-rec reg calist2 dlabel))))))
 (defun emit-jumpn-by-table-p (calist) (let ((min (caar calist)) (max (caar (last calist))) (len (length calist))) (and (<= 5 len) (<= (- max min) (* 3 len)))))
-(defun emit-jumpn-by-liner-p (calist) (<= (length calist) 2)) #| ;; emit linear jumps if <= 2 |#
+(defun emit-jumpn-by-liner-p (calist) (<= (length calist) 2)) #|;; emit linear jumps if <= 2 ;;|#
 (defun emit-jumpn-by-liner (reg calist dlabel) (dolist (c calist) (emit-mcode (list 'cmp (list 'i4 (car c)) reg)) (emit-mcode (list 'jmp-eq (cadr c)))) (when dlabel (emit-mcode (list 'jmp-1 dlabel))))
 (defun emit-jumpn-split-calist (calist) (let ((len (length calist)) x y) (unless (<= 3 len) (clerror "emit-jumpn-split-calist: unexpedted list length")) (setq y (nthcdr (/ len 2) calist) x (ldiff calist y)) (list x (car y) (cdr y))))
 (defvar *mdl-jumpn-table-id* 0)
@@ -695,8 +760,9 @@
 (defun emit-jumpn-by-table (reg calist dlabel) (let ((min (caar calist)) (max (caar (last calist))) table) (cond ((zerop min) (emit-mcode (list 'mov reg 'r30W))) (t (decf max min) (emit-mcode (list 'addi (list 'i4 (- min)) reg 'r30W)) (dolist (c calist) (decf (car c) min)))) (setq table (make-jumpn-table calist dlabel)) (emit-mcode (list 'cmp (list 'i4 max) 'r30W)) (emit-mcode (list 'jmp-gtu dlabel)) (emit-mcode '(shl (i4 2) r30W)) (emit-mcode (list 'ld.w (list 'dx table 'r30W) 'r30W)) (emit-mcode '(jmp (dx 0 r30W)))))
 (defun make-jumpn-table (calist dlabel) (let ((tlabel (genlabel)) (table (make-tconc)) (n 0)) (setq (sent-asmname tlabel) (format nil "LS%d" (incf *mdl-jumpn-table-id*))) (dolist (c calist) (while (< n (car c)) (tconc table dlabel) (incf n)) (tconc table (cadr c)) (incf n)) (push (cons tlabel (tconc-list table)) *mdl-jumpn-table-list*) tlabel))
 (defun emit-jumpn-tables nil (dolist (table *mdl-jumpn-table-list*) (emit-acode-changeseg "const") (emit-acode-align 4) (emit-acode-def (sent-asmname (car table))) (dolist (e (cdr table)) (emit-acode-data 'i4 e))) (setq *mdl-jumpn-table-list* nil))
-(defcode label (label la) (gen nil (def 'la)))
 
+#|;; match tiling-bblock-ccode pass ;;|#
+(defcode label (label la) (gen nil (def 'la)))
 
 #|;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;; Prologue and Epilogue  ;;;;;;;;;;;;;;;;;
@@ -709,6 +775,7 @@
 (defvar *mdl-hreg-save-area* 0)
 (defvar *mdl-hreg-save-area-size* 0)
 
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode prologue (prologue)
     (gen nil
     (progn
@@ -720,7 +787,7 @@
             (incf frame *cfun-local-size*)
             (dolist (r *cfun-hreg-list*)
                 (let (res)
-                    (if (get r 'M-reg)
+                    (if (get r 'V-reg)
                         (setq *mdl-arg* *mdl-stack-arg-offset*))
                     (setq r (get r 'W-reg))
                     (unless (memq r res) (push r res))
@@ -759,22 +826,34 @@
                     (dolist (reg *cfun-hreg-list*)
                         (emit-mcode (list 'st.w reg (list 'sp (posincf off 4))))))))))
 
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode epilogue (epilogue)
     (gen nil
     (progn
         (unless (zerop *mdl-frame-size*) (emit-mcode 'pld)))
     (rtl)))
 
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode pusharg (set i8 (arg) (= x)) (reg nil x) (gen ((x . B-regs)) (progn (emit-mcode (list 'sta x (list 'sp *mdl-arg*))) (setq *mdl-arg* (+ *mdl-arg* 2)))))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode pusharg (set i16 (arg) (= x)) (reg nil x) (gen ((x . W-regs)) (progn (emit-mcode (list 'sta x (list 'sp *mdl-arg*))) (setq *mdl-arg* (+ *mdl-arg* 2)))))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode poparg (set (= n) (null) (get * (arg))) (gen nil (progn (setq *mdl-arg* (- *mdl-arg* n)))))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode calli8-general (call i8 (= f)) (reg r f) (gen ((r a.b) (f . W-regs-for-call-general) (use . caller-save-regs)) (mov (i4 (add * 10)) lp) (jmp (dx 0 'f))))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode calli16-general (call i16 (= f)) (reg r f) (gen ((r a.w) (f . W-regs-for-call-general) (use . caller-save-regs)) (mov (i4 (add * 10)) lp) (jmp (dx 0 'f))))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode callvoid-general (call void (= f)) (reg r f) (gen ((r a.w) (f . W-regs-for-call-general) (use . caller-save-regs)) (mov (i4 (add * 10)) lp) (jmp (dx 0 'f))))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode calli8-const (call i8 (const i16 (= f))) (reg r) (gen ((r a.b) (use . caller-save-regs)) (jsl (label 'f))))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode calli16-const (call i16 (const i16 (= f))) (reg r) (gen ((r a.w) (use . caller-save-regs)) (jsl (label 'f))))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode callvoid-const (call void (const i16 (= f))) (reg r) (gen ((r a.w) (use . caller-save-regs)) (jsl (label 'f))))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode ret-i8 (set i8 (ret) (= r)) (reg nil r) (gen ((r a.b))))
+#|;; match tiling-bblock-ccode pass ;;|#
 (defcode ret-i16 (set i16 (ret) (= r)) (reg nil r) (gen ((r a.w))))
 
 
